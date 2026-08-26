@@ -1,0 +1,10 @@
+{
+  "servers": {
+    "modeldesk-mcp": {
+      "type": "stdio",
+      "command": "${workspaceFolder}\\ModelDeskMCP.cmd",
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    }
+  }
+}

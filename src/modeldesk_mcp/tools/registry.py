@@ -1,0 +1,659 @@
+"""Register the public ModelDesk MCP tool surface with FastMCP.
+
+``EXPECTED_TOOL_NAMES`` is the public registration contract: names are lowercase
+``modeldesk_`` identifiers, remain unique, and are registered in tuple order.
+``TOOL_DOMAIN_BY_NAME`` records one owner for every name across the five public
+boundaries: General COM Automation, Scenario/TrafficScenario,
+Road/RoadGenerator, Plotting/PlotManager, and
+TrafficObjectManager/TrafficObject/TOM. General automation also owns lifecycle,
+parameter, processing, testing, and workflow tools that do not belong to one of
+the specialized domains.
+
+The wrappers below intentionally convert ``ToolResult`` objects to plain data;
+they do not call COM directly. COM access remains behind the service and
+``modeldesk_mcp.com_bridge`` boundary.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from modeldesk_mcp.contracts import ToolResult
+from modeldesk_mcp.domain import ModelDeskService
+
+
+EXPECTED_TOOL_NAMES = (
+    "modeldesk_get_status",
+    "modeldesk_get_capabilities",
+    "modeldesk_open_project",
+    "modeldesk_create_project_pool_file",
+    "modeldesk_create_road_network",
+    "modeldesk_create_traffic_scenario",
+    "modeldesk_list_environment_pool_items",
+    "modeldesk_save_project",
+    "modeldesk_close_project",
+    "modeldesk_list_experiments",
+    "modeldesk_activate_experiment",
+    "modeldesk_save_active_experiment",
+    "modeldesk_download_active_experiment",
+    "modeldesk_list_parameter_sets",
+    "modeldesk_activate_parameter_set",
+    "modeldesk_get_parameterization_summary",
+    "modeldesk_get_active_model_info",
+    "modeldesk_set_active_model",
+    "modeldesk_get_parameter_value",
+    "modeldesk_set_scalar_parameter",
+    "modeldesk_set_parameter_value",
+    "modeldesk_get_road_summary",
+    "modeldesk_activate_road",
+    "modeldesk_list_roads",
+    "modeldesk_save_road_network_as",
+    "modeldesk_add_road",
+    "modeldesk_update_road",
+    "modeldesk_remove_road",
+    "modeldesk_add_road_segment",
+    "modeldesk_update_road_segment",
+    "modeldesk_remove_road_segment",
+    "modeldesk_configure_road_lanes",
+    "modeldesk_add_road_object",
+    "modeldesk_update_road_object",
+    "modeldesk_remove_road_object",
+    "modeldesk_connect_roads",
+    "modeldesk_disconnect_road",
+    "modeldesk_create_basic_road",
+    "modeldesk_get_scenario_summary",
+    "modeldesk_activate_scenario",
+    "modeldesk_list_scenario_fellows",
+    "modeldesk_list_scenario_maneuvers",
+    "modeldesk_add_scenario_fellow",
+    "modeldesk_update_scenario_fellow",
+    "modeldesk_remove_scenario_fellow",
+    "modeldesk_add_scenario_maneuver",
+    "modeldesk_update_scenario_maneuver",
+    "modeldesk_remove_scenario_maneuver",
+    "modeldesk_set_scenario_maneuver_sequence",
+    "modeldesk_set_maneuver_behavior_profiles",
+    "modeldesk_get_scenario_road",
+    "modeldesk_set_scenario_road",
+    "modeldesk_list_fellow_activities",
+    "modeldesk_get_vehicle_object_type",
+    "modeldesk_list_vehicle_object_types",
+    "modeldesk_set_vehicle_object_type",
+    "modeldesk_get_traffic_objects_summary",
+    "modeldesk_list_traffic_objects",
+    "modeldesk_list_traffic_object_folders",
+    "modeldesk_validate_traffic_object_reference",
+    "modeldesk_add_traffic_object",
+    "modeldesk_remove_traffic_object",
+    "modeldesk_add_traffic_object_folder",
+    "modeldesk_remove_traffic_object_folder",
+    "modeldesk_get_processing_summary",
+    "modeldesk_get_processing_configuration",
+    "modeldesk_run_processing",
+    "modeldesk_get_test_summary",
+    "modeldesk_activate_test",
+    "modeldesk_list_logical_test_cases",
+    "modeldesk_list_concrete_test_cases",
+    "modeldesk_execute_test",
+    "modeldesk_get_plotting_summary",
+    "modeldesk_activate_plotting",
+    "modeldesk_list_plot_captures",
+    "modeldesk_list_plot_layouts",
+    "modeldesk_compare_captures",
+    "modeldesk_start_maneuver",
+    "modeldesk_stop_maneuver",
+    "modeldesk_reset_maneuver",
+    "modeldesk_synchronize_aurelion",
+    "modeldesk_get_workflow_plan",
+    "modeldesk_list_tools_by_use_case",
+)
+
+TOOL_DOMAINS = (
+    "General COM Automation",
+    "Scenario/TrafficScenario",
+    "Road/RoadGenerator",
+    "Plotting/PlotManager",
+    "TrafficObjectManager/TrafficObject/TOM",
+)
+
+
+def _tool_domain_for_name(tool_name: str) -> str:
+    """Assign each registered name to exactly one documented domain."""
+
+    if (
+        "_scenario_" in tool_name
+        or tool_name.endswith("_scenario")
+        or "maneuver" in tool_name
+        or tool_name == "modeldesk_list_fellow_activities"
+    ):
+        return "Scenario/TrafficScenario"
+    if "_traffic_object" in tool_name or "_vehicle_object" in tool_name:
+        return "TrafficObjectManager/TrafficObject/TOM"
+    if "_road" in tool_name:
+        return "Road/RoadGenerator"
+    if "_plot" in tool_name or "_capture" in tool_name:
+        return "Plotting/PlotManager"
+    return "General COM Automation"
+
+
+TOOL_DOMAIN_BY_NAME = {name: _tool_domain_for_name(name) for name in EXPECTED_TOOL_NAMES}
+
+
+def register_tools(mcp: Any, service: ModelDeskService) -> None:
+    """Register every expected tool exactly once on the provided FastMCP server."""
+
+    if mcp is None:
+        raise ValueError("mcp must not be None")
+    if service is None:
+        raise ValueError("service must not be None")
+
+    @mcp.tool(name="modeldesk_get_status")
+    def modeldesk_get_status() -> dict[str, Any]:
+        """Read server + context status; call first when active project/experiment state is unknown."""
+
+        return _to_dict(service.get_status())
+
+    @mcp.tool(name="modeldesk_get_capabilities")
+    def modeldesk_get_capabilities() -> dict[str, Any]:
+        """Read capability flags before workflows; use to avoid calling unsupported domains."""
+
+        return _to_dict(service.get_capabilities())
+
+    @mcp.tool(name="modeldesk_open_project")
+    def modeldesk_open_project(projectFile: str, initialExperiment: str | None = None, saveActive: bool = True) -> dict[str, Any]:
+        """Open a project file and optionally activate an initial experiment before project-scoped calls."""
+
+        return _to_dict(service.open_project(projectFile, initialExperiment, saveActive))
+
+    @mcp.tool(name="modeldesk_create_project_pool_file")
+    def modeldesk_create_project_pool_file(fileType: str, name: str, overwriteExisting: bool = False) -> dict[str, Any]:
+        """Create a generic project-pool file via CreateFile(Type, Name, OverwriteExisting)."""
+
+        return _to_dict(service.create_project_pool_file(fileType, name, overwriteExisting))
+
+    @mcp.tool(name="modeldesk_create_road_network")
+    def modeldesk_create_road_network(name: str, overwriteExisting: bool = False) -> dict[str, Any]:
+        """Create a Road Network (.rd) pool file; preferred over generic CreateFile for type 0."""
+
+        return _to_dict(service.create_road_network(name, overwriteExisting))
+
+    @mcp.tool(name="modeldesk_create_traffic_scenario")
+    def modeldesk_create_traffic_scenario(name: str, overwriteExisting: bool = False) -> dict[str, Any]:
+        """Create a Traffic Scenario (.xml) pool file; preferred over generic CreateFile for type 1."""
+
+        return _to_dict(service.create_traffic_scenario(name, overwriteExisting))
+
+    @mcp.tool(name="modeldesk_list_environment_pool_items")
+    def modeldesk_list_environment_pool_items(group: str, recursive: bool = True) -> dict[str, Any]:
+        """Read-only list of Environment Pool items for the selected group."""
+
+        return _to_dict(service.list_environment_pool_items(group, recursive))
+
+    @mcp.tool(name="modeldesk_save_project")
+    def modeldesk_save_project() -> dict[str, Any]:
+        """Persist active project changes to disk."""
+
+        return _to_dict(service.save_project())
+
+    @mcp.tool(name="modeldesk_close_project")
+    def modeldesk_close_project(save: bool = True) -> dict[str, Any]:
+        """Close active project, optionally saving first to prevent unsaved state loss."""
+
+        return _to_dict(service.close_project(save))
+
+    @mcp.tool(name="modeldesk_list_experiments")
+    def modeldesk_list_experiments() -> dict[str, Any]:
+        """List experiments in the active project; usually followed by experiment activation."""
+
+        return _to_dict(service.list_experiments())
+
+    @mcp.tool(name="modeldesk_activate_experiment")
+    def modeldesk_activate_experiment(selectorKind: str, selectorValue: str, saveActive: bool = True) -> dict[str, Any]:
+        """Activate an experiment by selector; required before parameter-set, processing, and runtime tools."""
+
+        return _to_dict(service.activate_experiment(selectorKind, selectorValue, saveActive))
+
+    @mcp.tool(name="modeldesk_save_active_experiment")
+    def modeldesk_save_active_experiment() -> dict[str, Any]:
+        """Persist active experiment state after mutations."""
+
+        return _to_dict(service.save_active_experiment())
+
+    @mcp.tool(name="modeldesk_download_active_experiment")
+    def modeldesk_download_active_experiment() -> dict[str, Any]:
+        """Download active experiment to runtime before execution-dependent operations."""
+
+        return _to_dict(service.download_active_experiment())
+
+    @mcp.tool(name="modeldesk_list_parameter_sets")
+    def modeldesk_list_parameter_sets() -> dict[str, Any]:
+        """List parameter sets in active experiment; usually followed by parameter-set activation."""
+
+        return _to_dict(service.list_parameter_sets())
+
+    @mcp.tool(name="modeldesk_activate_parameter_set")
+    def modeldesk_activate_parameter_set(selectorKind: str, selectorValue: str, saveActive: bool = True) -> dict[str, Any]:
+        """Activate parameter set by selector before reading/writing parameter values or running processing."""
+
+        return _to_dict(service.activate_parameter_set(selectorKind, selectorValue, saveActive))
+
+    @mcp.tool(name="modeldesk_get_parameterization_summary")
+    def modeldesk_get_parameterization_summary() -> dict[str, Any]:
+        """Read active parameterization context (experiment, model, parameter set) for validation and reporting."""
+
+        return _to_dict(service.get_parameterization_summary())
+
+    @mcp.tool(name="modeldesk_get_active_model_info")
+    def modeldesk_get_active_model_info() -> dict[str, Any]:
+        """Read current active-model binding for the active experiment."""
+
+        return _to_dict(service.get_active_model_info())
+
+    @mcp.tool(name="modeldesk_set_active_model")
+    def modeldesk_set_active_model(modelFilePath: str, mlWorkingDirectory: str | None = None, initializationCommand: str | None = None, platformName: str | None = None) -> dict[str, Any]:
+        """Set active model binding (and optional ML metadata) for the active experiment."""
+
+        return _to_dict(service.set_active_model(modelFilePath, mlWorkingDirectory, initializationCommand, platformName))
+
+    @mcp.tool(name="modeldesk_get_parameter_value")
+    def modeldesk_get_parameter_value(parameterPath: str) -> dict[str, Any]:
+        """Read one parameter by exact path from the active parameter set."""
+
+        return _to_dict(service.get_parameter_value(parameterPath))
+
+    @mcp.tool(name="modeldesk_set_scalar_parameter")
+    def modeldesk_set_scalar_parameter(parameterPath: str, value: str) -> dict[str, Any]:
+        """Set a single scalar parameter value in the active parameter set."""
+
+        return _to_dict(service.set_scalar_parameter(parameterPath, value))
+
+    @mcp.tool(name="modeldesk_set_parameter_value")
+    def modeldesk_set_parameter_value(parameterPath: str, valueKind: str, valueJson: str) -> dict[str, Any]:
+        """Set typed parameter value (`scalar|text|vector|matrix|table`) from JSON payload."""
+
+        return _to_dict(service.set_parameter_value(parameterPath, valueKind, valueJson))
+
+    @mcp.tool(name="modeldesk_get_road_summary")
+    def modeldesk_get_road_summary() -> dict[str, Any]:
+        """Read active road-domain context before road-network mutations."""
+
+        return _to_dict(service.get_road_summary())
+
+    @mcp.tool(name="modeldesk_activate_road")
+    def modeldesk_activate_road(selectorKind: str, selectorValue: str) -> dict[str, Any]:
+        """Activate road/road-network target by selector before road operations."""
+
+        return _to_dict(service.activate_road(selectorKind, selectorValue))
+
+    @mcp.tool(name="modeldesk_list_roads")
+    def modeldesk_list_roads() -> dict[str, Any]:
+        """List roads in the active road network to resolve safe selectors for update/remove/connect."""
+
+        return _to_dict(service.list_roads())
+
+    @mcp.tool(name="modeldesk_save_road_network_as")
+    def modeldesk_save_road_network_as(fileName: str, overwriteExisting: bool = False) -> dict[str, Any]:
+        """Save active road network to an absolute `.rd` path."""
+
+        return _to_dict(service.save_road_network_as(fileName, overwriteExisting))
+
+    @mcp.tool(name="modeldesk_add_road")
+    def modeldesk_add_road(name: str | None = None, leftLaneCount: int = 1, rightLaneCount: int = 1, laneWidth: float = 3.5, save: bool = False, download: bool = False) -> dict[str, Any]:
+        """Add a road and initialize first lane section; `save`/`download` should stay false unless explicitly requested."""
+
+        return _to_dict(service.add_road(name, leftLaneCount, rightLaneCount, laneWidth, save, download))
+
+    @mcp.tool(name="modeldesk_update_road")
+    def modeldesk_update_road(roadSelectorKind: str = "index", roadSelectorValue: str = "0", name: str | None = None, save: bool = False, download: bool = False) -> dict[str, Any]:
+        """Update selected road properties (currently name); resolve selector from list output first."""
+
+        return _to_dict(service.update_road(roadSelectorKind, roadSelectorValue, name, save, download))
+
+    @mcp.tool(name="modeldesk_remove_road")
+    def modeldesk_remove_road(roadSelectorKind: str = "index", roadSelectorValue: str = "0", save: bool = False, download: bool = False) -> dict[str, Any]:
+        """Remove selected road from active network; verify selector to avoid accidental deletion."""
+
+        return _to_dict(service.remove_road(roadSelectorKind, roadSelectorValue, save, download))
+
+    @mcp.tool(name="modeldesk_add_road_segment")
+    def modeldesk_add_road_segment(roadSelectorKind: str = "index", roadSelectorValue: str = "0", segmentType: str = "Straight", propertiesJson: str = "{}", insertAfterSegmentIndex: int = -1, save: bool = False, download: bool = False) -> dict[str, Any]:
+        """Add typed segment (`Straight|Circular|Clothoid|Spline`) to selected road using `propertiesJson`."""
+
+        return _to_dict(service.add_road_segment(roadSelectorKind, roadSelectorValue, segmentType, propertiesJson, insertAfterSegmentIndex, save, download))
+
+    @mcp.tool(name="modeldesk_update_road_segment")
+    def modeldesk_update_road_segment(roadSelectorKind: str = "index", roadSelectorValue: str = "0", segmentIndex: int = 0, segmentType: str | None = None, propertiesJson: str = "{}", save: bool = False, download: bool = False) -> dict[str, Any]:
+        """Update segment type and/or properties by `segmentIndex` on selected road."""
+
+        return _to_dict(service.update_road_segment(roadSelectorKind, roadSelectorValue, segmentIndex, segmentType, propertiesJson, save, download))
+
+    @mcp.tool(name="modeldesk_remove_road_segment")
+    def modeldesk_remove_road_segment(roadSelectorKind: str = "index", roadSelectorValue: str = "0", segmentIndex: int = 0, save: bool = False, download: bool = False) -> dict[str, Any]:
+        """Remove one road segment by index from selected road."""
+
+        return _to_dict(service.remove_road_segment(roadSelectorKind, roadSelectorValue, segmentIndex, save, download))
+
+    @mcp.tool(name="modeldesk_configure_road_lanes")
+    def modeldesk_configure_road_lanes(roadSelectorKind: str = "index", roadSelectorValue: str = "0", laneSectionIndex: int = 0, leftLaneCount: int = 1, rightLaneCount: int = 1, laneWidth: float = 3.5, laneSectionLength: float = 0.0, save: bool = False, download: bool = False) -> dict[str, Any]:
+        """Configure lane counts/width (and optional length) for selected lane section."""
+
+        return _to_dict(service.configure_road_lanes(roadSelectorKind, roadSelectorValue, laneSectionIndex, leftLaneCount, rightLaneCount, laneWidth, laneSectionLength, save, download))
+
+    @mcp.tool(name="modeldesk_add_road_object")
+    def modeldesk_add_road_object(roadSelectorKind: str = "index", roadSelectorValue: str = "0", s: float = 0.0, d: float = 0.0, name: str | None = None, catalogPath: str | None = None, laneMappingJson: str = "[]", save: bool = False, download: bool = False) -> dict[str, Any]:
+        """Add road-local traffic object at road-relative (`s`,`d`) with optional catalog/lane mapping."""
+
+        return _to_dict(service.add_road_object(roadSelectorKind, roadSelectorValue, s, d, name, catalogPath, laneMappingJson, save, download))
+
+    @mcp.tool(name="modeldesk_update_road_object")
+    def modeldesk_update_road_object(roadSelectorKind: str = "index", roadSelectorValue: str = "0", objectIndex: int = 0, propertiesJson: str = "{}", save: bool = False, download: bool = False) -> dict[str, Any]:
+        """Update selected road-object fields using `propertiesJson` patch semantics."""
+
+        return _to_dict(service.update_road_object(roadSelectorKind, roadSelectorValue, objectIndex, propertiesJson, save, download))
+
+    @mcp.tool(name="modeldesk_remove_road_object")
+    def modeldesk_remove_road_object(roadSelectorKind: str = "index", roadSelectorValue: str = "0", objectIndex: int = 0, save: bool = False, download: bool = False) -> dict[str, Any]:
+        """Remove one road-local object by index from selected road."""
+
+        return _to_dict(service.remove_road_object(roadSelectorKind, roadSelectorValue, objectIndex, save, download))
+
+    @mcp.tool(name="modeldesk_connect_roads")
+    def modeldesk_connect_roads(sourceRoadSelectorKind: str = "index", sourceRoadSelectorValue: str = "0", sourcePoint: str = "End", targetRoadSelectorKind: str = "index", targetRoadSelectorValue: str = "1", targetPoint: str = "Start", mode: str = "Move", save: bool = False, download: bool = False) -> dict[str, Any]:
+        """Connect source/target road endpoints; `mode` controls geometry adaptation (`Move` or `Modify`)."""
+
+        return _to_dict(service.connect_roads(sourceRoadSelectorKind, sourceRoadSelectorValue, sourcePoint, targetRoadSelectorKind, targetRoadSelectorValue, targetPoint, mode, save, download))
+
+    @mcp.tool(name="modeldesk_disconnect_road")
+    def modeldesk_disconnect_road(roadSelectorKind: str = "index", roadSelectorValue: str = "0", connectionPoint: str = "End", save: bool = False, download: bool = False) -> dict[str, Any]:
+        """Disconnect selected road connection point (`Start` or `End`)."""
+
+        return _to_dict(service.disconnect_road(roadSelectorKind, roadSelectorValue, connectionPoint, save, download))
+
+    @mcp.tool(name="modeldesk_create_basic_road")
+    def modeldesk_create_basic_road(name: str, length: float, leftLaneCount: int, rightLaneCount: int, laneWidth: float = 3.5, trafficObjectsJson: str = "[]", save: bool = False, download: bool = False) -> dict[str, Any]:
+        """High-level helper: create straight road with lanes and optional traffic objects in one call."""
+
+        return _to_dict(service.create_basic_road(name, length, leftLaneCount, rightLaneCount, laneWidth, trafficObjectsJson, save, download))
+
+    @mcp.tool(name="modeldesk_get_scenario_summary")
+    def modeldesk_get_scenario_summary() -> dict[str, Any]:
+        """Read active scenario context before fellow/maneuver mutations."""
+
+        return _to_dict(service.get_scenario_summary())
+
+    @mcp.tool(name="modeldesk_activate_scenario")
+    def modeldesk_activate_scenario(scenarioName: str) -> dict[str, Any]:
+        """Activate scenario by name before scenario-scoped read/write tools."""
+
+        return _to_dict(service.activate_scenario(scenarioName))
+
+    @mcp.tool(name="modeldesk_list_scenario_fellows")
+    def modeldesk_list_scenario_fellows() -> dict[str, Any]:
+        """List fellows/participants and selectors for follow-up update/remove/maneuver calls."""
+
+        return _to_dict(service.list_scenario_fellows())
+
+    @mcp.tool(name="modeldesk_list_scenario_maneuvers")
+    def modeldesk_list_scenario_maneuvers() -> dict[str, Any]:
+        """List maneuvers in active scenario to resolve selectors and indices for edits."""
+
+        return _to_dict(service.list_scenario_maneuvers())
+
+    @mcp.tool(name="modeldesk_add_scenario_fellow")
+    def modeldesk_add_scenario_fellow(name: str | None = None, propertiesJson: str = "{}", trafficObjectSelectorKind: str | None = None, trafficObjectSelectorValue: str | None = None, trafficObjectCatalogPath: str | None = None, trafficDriverReference: str | None = None, save: bool = False, download: bool = False) -> dict[str, Any]:
+        """Add fellow/participant with optional properties, traffic-object reference, and driver reference."""
+
+        return _to_dict(service.add_scenario_fellow(name, propertiesJson, trafficObjectSelectorKind, trafficObjectSelectorValue, trafficObjectCatalogPath, trafficDriverReference, save, download))
+
+    @mcp.tool(name="modeldesk_update_scenario_fellow")
+    def modeldesk_update_scenario_fellow(fellowSelectorKind: str = "index", fellowSelectorValue: str = "0", name: str | None = None, propertiesJson: str = "{}", trafficObjectSelectorKind: str | None = None, trafficObjectSelectorValue: str | None = None, trafficObjectCatalogPath: str | None = None, trafficDriverReference: str | None = None, save: bool = False, download: bool = False) -> dict[str, Any]:
+        """Update selected fellow fields/references; prefer list -> select -> update flow."""
+
+        return _to_dict(service.update_scenario_fellow(fellowSelectorKind, fellowSelectorValue, name, propertiesJson, trafficObjectSelectorKind, trafficObjectSelectorValue, trafficObjectCatalogPath, trafficDriverReference, save, download))
+
+    @mcp.tool(name="modeldesk_remove_scenario_fellow")
+    def modeldesk_remove_scenario_fellow(fellowSelectorKind: str = "index", fellowSelectorValue: str = "0", save: bool = False, download: bool = False) -> dict[str, Any]:
+        """Remove selected fellow from active scenario."""
+
+        return _to_dict(service.remove_scenario_fellow(fellowSelectorKind, fellowSelectorValue, save, download))
+
+    @mcp.tool(name="modeldesk_add_scenario_maneuver")
+    def modeldesk_add_scenario_maneuver(fellowSelectorKind: str | None = None, fellowSelectorValue: str | None = None, propertiesJson: str = "{}", save: bool = False, download: bool = False) -> dict[str, Any]:
+        """Add maneuver to active scenario scope (ego) or selected fellow scope."""
+
+        return _to_dict(service.add_scenario_maneuver(fellowSelectorKind, fellowSelectorValue, propertiesJson, save, download))
+
+    @mcp.tool(name="modeldesk_update_scenario_maneuver")
+    def modeldesk_update_scenario_maneuver(fellowSelectorKind: str | None = None, fellowSelectorValue: str | None = None, maneuverSelectorKind: str = "index", maneuverSelectorValue: str = "0", propertiesJson: str = "{}", save: bool = False, download: bool = False) -> dict[str, Any]:
+        """Update selected maneuver using `propertiesJson` on ego or fellow scope."""
+
+        return _to_dict(service.update_scenario_maneuver(fellowSelectorKind, fellowSelectorValue, maneuverSelectorKind, maneuverSelectorValue, propertiesJson, save, download))
+
+    @mcp.tool(name="modeldesk_remove_scenario_maneuver")
+    def modeldesk_remove_scenario_maneuver(fellowSelectorKind: str | None = None, fellowSelectorValue: str | None = None, maneuverSelectorKind: str = "index", maneuverSelectorValue: str = "0", save: bool = False, download: bool = False) -> dict[str, Any]:
+        """Remove selected maneuver from ego or selected fellow scope."""
+
+        return _to_dict(service.remove_scenario_maneuver(fellowSelectorKind, fellowSelectorValue, maneuverSelectorKind, maneuverSelectorValue, save, download))
+
+    @mcp.tool(name="modeldesk_set_scenario_maneuver_sequence")
+    def modeldesk_set_scenario_maneuver_sequence(fellowSelectorKind: str | None = None, fellowSelectorValue: str | None = None, maneuverSelectorsJson: str = "[]", save: bool = False, download: bool = False) -> dict[str, Any]:
+        """Set maneuver execution order using selector array JSON for ego or fellow scope."""
+
+        return _to_dict(service.set_scenario_maneuver_sequence(fellowSelectorKind, fellowSelectorValue, maneuverSelectorsJson, save, download))
+
+    @mcp.tool(name="modeldesk_set_maneuver_behavior_profiles")
+    def modeldesk_set_maneuver_behavior_profiles(fellowSelectorKind: str | None = None, fellowSelectorValue: str | None = None, maneuverSelectorKind: str = "index", maneuverSelectorValue: str = "0", longitudinalProfileJson: str = "{}", lateralProfileJson: str = "{}", save: bool = False, download: bool = False) -> dict[str, Any]:
+        """Set longitudinal/lateral behavior profile JSON on selected maneuver."""
+
+        return _to_dict(service.set_maneuver_behavior_profiles(fellowSelectorKind, fellowSelectorValue, maneuverSelectorKind, maneuverSelectorValue, longitudinalProfileJson, lateralProfileJson, save, download))
+
+    @mcp.tool(name="modeldesk_get_scenario_road")
+    def modeldesk_get_scenario_road() -> dict[str, Any]:
+        """Read currently referenced road for the active scenario."""
+
+        return _to_dict(service.get_scenario_road())
+
+    @mcp.tool(name="modeldesk_set_scenario_road")
+    def modeldesk_set_scenario_road(roadName: str, save: bool = False, download: bool = False) -> dict[str, Any]:
+        """Set scenario road reference by road name after validating available roads."""
+
+        return _to_dict(service.set_scenario_road(roadName, save, download))
+
+    @mcp.tool(name="modeldesk_list_fellow_activities")
+    def modeldesk_list_fellow_activities(fellowSelectorKind: str | None = None, fellowSelectorValue: str | None = None) -> dict[str, Any]:
+        """List activities for selected fellow or ego (`active` defaults) to discover maneuver targets."""
+
+        kind = fellowSelectorKind if fellowSelectorKind is not None else "active"
+        value = fellowSelectorValue if fellowSelectorValue is not None else "active"
+        return _to_dict(service.list_fellow_activities(kind, value))
+
+    @mcp.tool(name="modeldesk_get_vehicle_object_type")
+    def modeldesk_get_vehicle_object_type(fellowSelectorKind: str | None = None, fellowSelectorValue: str | None = None, maneuverIndex: int = 0) -> dict[str, Any]:
+        """Read active 3D vehicle object type for selected fellow/ego maneuver index."""
+
+        kind = fellowSelectorKind if fellowSelectorKind is not None else "active"
+        value = fellowSelectorValue if fellowSelectorValue is not None else "active"
+        return _to_dict(service.get_vehicle_object_type(kind, value, maneuverIndex))
+
+    @mcp.tool(name="modeldesk_list_vehicle_object_types")
+    def modeldesk_list_vehicle_object_types(fellowSelectorKind: str | None = None, fellowSelectorValue: str | None = None, maneuverIndex: int = 0) -> dict[str, Any]:
+        """List selectable 3D vehicle object types for selected fellow/ego maneuver index."""
+
+        kind = fellowSelectorKind if fellowSelectorKind is not None else "active"
+        value = fellowSelectorValue if fellowSelectorValue is not None else "active"
+        return _to_dict(service.list_vehicle_object_types(kind, value, maneuverIndex))
+
+    @mcp.tool(name="modeldesk_set_vehicle_object_type")
+    def modeldesk_set_vehicle_object_type(fellowSelectorKind: str | None = None, fellowSelectorValue: str | None = None, maneuverIndex: int = 0, elementIndex: int = 0, save: bool = False, download: bool = False) -> dict[str, Any]:
+        """Activate 3D vehicle object type by `elementIndex` for selected fellow/ego maneuver index."""
+
+        kind = fellowSelectorKind if fellowSelectorKind is not None else "active"
+        value = fellowSelectorValue if fellowSelectorValue is not None else "active"
+        return _to_dict(service.set_vehicle_object_type(kind, value, maneuverIndex, elementIndex, save, download))
+
+    @mcp.tool(name="modeldesk_get_traffic_objects_summary")
+    def modeldesk_get_traffic_objects_summary() -> dict[str, Any]:
+        """Read traffic-object catalog summary before object/folder operations."""
+
+        return _to_dict(service.get_traffic_objects_summary())
+
+    @mcp.tool(name="modeldesk_list_traffic_objects")
+    def modeldesk_list_traffic_objects() -> dict[str, Any]:
+        """List reusable traffic objects and selectors from Traffic Object Manager."""
+
+        return _to_dict(service.list_traffic_objects())
+
+    @mcp.tool(name="modeldesk_list_traffic_object_folders")
+    def modeldesk_list_traffic_object_folders() -> dict[str, Any]:
+        """List catalog folders from Traffic Object Manager for path/selector discovery."""
+
+        return _to_dict(service.list_traffic_object_folders())
+
+    @mcp.tool(name="modeldesk_validate_traffic_object_reference")
+    def modeldesk_validate_traffic_object_reference(selectorKind: str, selectorValue: str) -> dict[str, Any]:
+        """Preflight check: validate traffic-object selector resolves before assignment to road/scenario."""
+
+        return _to_dict(service.validate_traffic_object_reference(selectorKind, selectorValue))
+
+    @mcp.tool(name="modeldesk_add_traffic_object")
+    def modeldesk_add_traffic_object(name: str, object3D: str) -> dict[str, Any]:
+        """Add traffic object entry to Traffic Object Manager (when capability is enabled)."""
+
+        return _to_dict(service.add_traffic_object(name, object3D))
+
+    @mcp.tool(name="modeldesk_remove_traffic_object")
+    def modeldesk_remove_traffic_object(selectorKind: str, selectorValue: str) -> dict[str, Any]:
+        """Remove traffic object by selector; verify target via listing first."""
+
+        return _to_dict(service.remove_traffic_object(selectorKind, selectorValue))
+
+    @mcp.tool(name="modeldesk_add_traffic_object_folder")
+    def modeldesk_add_traffic_object_folder(name: str) -> dict[str, Any]:
+        """Add folder to Traffic Object Manager hierarchy."""
+
+        return _to_dict(service.add_traffic_object_folder(name))
+
+    @mcp.tool(name="modeldesk_remove_traffic_object_folder")
+    def modeldesk_remove_traffic_object_folder(selectorKind: str, selectorValue: str) -> dict[str, Any]:
+        """Remove traffic-object folder by selector; confirm exact folder before delete."""
+
+        return _to_dict(service.remove_traffic_object_folder(selectorKind, selectorValue))
+
+    @mcp.tool(name="modeldesk_get_processing_summary")
+    def modeldesk_get_processing_summary() -> dict[str, Any]:
+        """Read processing readiness summary for the active parameter set."""
+
+        return _to_dict(service.get_processing_summary())
+
+    @mcp.tool(name="modeldesk_get_processing_configuration")
+    def modeldesk_get_processing_configuration() -> dict[str, Any]:
+        """Read detailed processing configuration for the active parameter set."""
+
+        return _to_dict(service.get_processing_configuration())
+
+    @mcp.tool(name="modeldesk_run_processing")
+    def modeldesk_run_processing() -> dict[str, Any]:
+        """Execute processing for active parameter set; requires active experiment and parameter set."""
+
+        return _to_dict(service.run_processing())
+
+    @mcp.tool(name="modeldesk_get_test_summary")
+    def modeldesk_get_test_summary() -> dict[str, Any]:
+        """Read active test configuration summary before test listing or execution."""
+
+        return _to_dict(service.get_test_summary())
+
+    @mcp.tool(name="modeldesk_activate_test")
+    def modeldesk_activate_test(testName: str) -> dict[str, Any]:
+        """Activate test configuration by name before listing/executing cases."""
+
+        return _to_dict(service.activate_test(testName))
+
+    @mcp.tool(name="modeldesk_list_logical_test_cases")
+    def modeldesk_list_logical_test_cases() -> dict[str, Any]:
+        """List logical test cases from active test configuration."""
+
+        return _to_dict(service.list_logical_test_cases())
+
+    @mcp.tool(name="modeldesk_list_concrete_test_cases")
+    def modeldesk_list_concrete_test_cases() -> dict[str, Any]:
+        """List concrete test cases from active test configuration."""
+
+        return _to_dict(service.list_concrete_test_cases())
+
+    @mcp.tool(name="modeldesk_execute_test")
+    def modeldesk_execute_test(scope: str = "test", selectorKind: str | None = None, selectorValue: str | None = None) -> dict[str, Any]:
+        """Execute full active test or selected logical case based on `scope` and selector arguments."""
+
+        return _to_dict(service.execute_test(scope, selectorKind, selectorValue))
+
+    @mcp.tool(name="modeldesk_get_plotting_summary")
+    def modeldesk_get_plotting_summary() -> dict[str, Any]:
+        """Read plotting activation state and available captures/layouts."""
+
+        return _to_dict(service.get_plotting_summary())
+
+    @mcp.tool(name="modeldesk_activate_plotting")
+    def modeldesk_activate_plotting(selectorKind: str, selectorValue: str) -> dict[str, Any]:
+        """Activate plotting configuration by selector before capture/layout listing."""
+
+        return _to_dict(service.activate_plotting(selectorKind, selectorValue))
+
+    @mcp.tool(name="modeldesk_list_plot_captures")
+    def modeldesk_list_plot_captures() -> dict[str, Any]:
+        """List captures in active plotting configuration."""
+
+        return _to_dict(service.list_plot_captures())
+
+    @mcp.tool(name="modeldesk_list_plot_layouts")
+    def modeldesk_list_plot_layouts() -> dict[str, Any]:
+        """List plot layouts in active plotting configuration."""
+
+        return _to_dict(service.list_plot_layouts())
+
+    @mcp.tool(name="modeldesk_compare_captures")
+    def modeldesk_compare_captures(referenceCapture: str, candidateCapture: str, signalSpecsJson: str, tolerancesJson: str) -> dict[str, Any]:
+        """Compare two captures (currently capability placeholder until numeric backend is available)."""
+
+        _ = (referenceCapture, candidateCapture, signalSpecsJson, tolerancesJson)
+        return _to_dict(service.compare_captures())
+
+    @mcp.tool(name="modeldesk_start_maneuver")
+    def modeldesk_start_maneuver(downloadIfNotRunning: bool = True) -> dict[str, Any]:
+        """Start maneuver execution; optionally download experiment first if runtime is not running."""
+
+        return _to_dict(service.start_maneuver(downloadIfNotRunning))
+
+    @mcp.tool(name="modeldesk_stop_maneuver")
+    def modeldesk_stop_maneuver() -> dict[str, Any]:
+        """Stop ongoing maneuver execution."""
+
+        return _to_dict(service.stop_maneuver())
+
+    @mcp.tool(name="modeldesk_reset_maneuver")
+    def modeldesk_reset_maneuver() -> dict[str, Any]:
+        """Reset maneuver execution state to initial condition."""
+
+        return _to_dict(service.reset_maneuver())
+
+    @mcp.tool(name="modeldesk_synchronize_aurelion")
+    def modeldesk_synchronize_aurelion(system: str | None = None, scenario: str | None = None) -> dict[str, Any]:
+        """Synchronize active scene to AURELION with optional system/scenario routing values."""
+
+        return _to_dict(service.synchronize_aurelion(system, scenario))
+
+    @mcp.tool(name="modeldesk_get_workflow_plan")
+    def modeldesk_get_workflow_plan(workflowName: str) -> dict[str, Any]:
+        """Return dry-run workflow recipe (ordered lower-level tool calls) for planning."""
+
+        return _to_dict(service.get_workflow_plan(workflowName))
+
+    @mcp.tool(name="modeldesk_list_tools_by_use_case")
+    def modeldesk_list_tools_by_use_case(useCase: str) -> dict[str, Any]:
+        """[Supporting] Resolve a use-case query ('3', 'UC3', 'Use Case 3') to its tagged MCP tool names."""
+
+        return _to_dict(service.list_tools_by_use_case(useCase))
+
+
+def _to_dict(result: ToolResult) -> dict[str, Any]:
+    return result.to_dict()
