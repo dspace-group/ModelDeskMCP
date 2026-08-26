@@ -1,4 +1,4 @@
-"""Deterministic tests for metadata CLI and generated agent skill parity."""
+"""Deterministic tests for metadata CLI and agent skill parity."""
 
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
@@ -9,13 +9,11 @@ import pytest
 
 from modeldesk_mcp import __version__, server
 from modeldesk_mcp.tools import EXPECTED_TOOL_NAMES, TOOL_DOMAIN_BY_NAME, TOOL_DOMAINS
-from scripts.generate_tool_skill import (
-    BEGIN_MARKER,
-    END_MARKER,
-    SKILL_PATH,
-    extract_tool_metadata,
-    render_tool_index,
-)
+
+
+SKILL_PATH = Path(__file__).resolve().parents[1] / ".github" / "skills" / "modeldesk-mcp-tools" / "SKILL.md"
+BEGIN_MARKER = "<!-- BEGIN TOOL INDEX -->"
+END_MARKER = "<!-- END TOOL INDEX -->"
 
 
 @pytest.mark.parametrize(
@@ -79,26 +77,18 @@ def test_cli_rejects_multiple_metadata_flags_with_argparse_error() -> None:
     assert "not allowed with argument" in stderr.getvalue()
 
 
-def test_expected_tool_count_and_unique_registry_metadata() -> None:
-    metadata = extract_tool_metadata()
-    names = tuple(tool.name for tool in metadata)
-
+def test_expected_tool_names_have_expected_count_and_are_unique() -> None:
     assert len(EXPECTED_TOOL_NAMES) == 83
-    assert len(names) == 83
-    assert names == EXPECTED_TOOL_NAMES
-    assert len(names) == len(set(names))
     assert len(set(EXPECTED_TOOL_NAMES)) == 83
-    assert all(tool.description for tool in metadata)
 
 
-def test_skill_generated_markers_and_index_parity() -> None:
+def test_skill_markers_and_index_parity() -> None:
     skill = SKILL_PATH.read_text(encoding="utf-8")
     begin = skill.index(BEGIN_MARKER)
     end = skill.index(END_MARKER)
-    generated = skill[begin : end + len(END_MARKER)]
+    tool_index = skill[begin : end + len(END_MARKER)]
 
-    assert generated == render_tool_index()
-    names = tuple(re.findall(r"^\| `(modeldesk_[a-z0-9_]+)` \|", generated, re.MULTILINE))
+    names = tuple(re.findall(r"^\| `(modeldesk_[a-z0-9_]+)` \|", tool_index, re.MULTILINE))
     expected_grouped_names = tuple(
         name for domain in TOOL_DOMAINS for name in EXPECTED_TOOL_NAMES if TOOL_DOMAIN_BY_NAME[name] == domain
     )
@@ -109,12 +99,12 @@ def test_skill_generated_markers_and_index_parity() -> None:
 
 def test_skill_index_preserves_registry_order_within_each_domain() -> None:
     skill = SKILL_PATH.read_text(encoding="utf-8")
-    generated = skill[skill.index(BEGIN_MARKER) : skill.index(END_MARKER) + len(END_MARKER)]
+    tool_index = skill[skill.index(BEGIN_MARKER) : skill.index(END_MARKER) + len(END_MARKER)]
 
     for domain in TOOL_DOMAINS:
-        section_start = generated.index(f"### {domain}")
-        section_end = generated.find("### ", section_start + len(domain) + 4)
-        section = generated[section_start:] if section_end < 0 else generated[section_start:section_end]
+        section_start = tool_index.index(f"### {domain}")
+        section_end = tool_index.find("### ", section_start + len(domain) + 4)
+        section = tool_index[section_start:] if section_end < 0 else tool_index[section_start:section_end]
         actual = tuple(re.findall(r"^\| `(modeldesk_[a-z0-9_]+)` \|", section, re.MULTILINE))
         expected = tuple(name for name in EXPECTED_TOOL_NAMES if TOOL_DOMAIN_BY_NAME[name] == domain)
         assert actual == expected

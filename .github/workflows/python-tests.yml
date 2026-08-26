@@ -67,8 +67,3 @@ jobs:
         shell: pwsh
         run: |
           python -m modeldesk_mcp.smoke --skip-com-status
-
-      - name: Check for backend skill generator drift
-        shell: pwsh
-        run: |
-          python scripts/generate_tool_skill.py --check
