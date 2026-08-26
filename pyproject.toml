@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "modeldesk-mcp"
+version = "0.1.0"
+description = "Python 3.14 MCP server for ModelDesk Automation/COM."
+requires-python = ">=3.14"
+dependencies = [
+    "mcp[cli]>=1.27.1,<2",
+    "pywin32>=306; platform_system == 'Windows'"
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0"
+]
+
+[project.scripts]
+modeldesk-mcp = "modeldesk_mcp.server:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
