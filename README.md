@@ -33,37 +33,26 @@ If activation is blocked, run the editable install directly with `py -3.14 -m pi
 
 ## Local stdio behavior
 
-The server runs as a local stdio MCP process. When started without arguments, it listens on standard input/output for MCP requests. Any metadata-style CLI flags are part of the backend contract and are forwarded through the source-checkout launcher; the launcher itself is only responsible for invoking the local checkout in a predictable way.
+The server runs as a local stdio MCP process. When started without arguments, it listens on standard input/output for MCP requests. Start the source checkout directly with `py -3.14 server.py`; metadata-style CLI flags are part of the same backend contract.
 
 ## MCP client configuration
 
-The repository includes a VS Code example in `.vscode/mcp.json`. Use the launcher from the checkout root:
+The repository includes a VS Code example in `.vscode/mcp.json`. Run the Python entry point from the checkout root:
 
 ```json
 {
   "servers": {
     "modeldesk-mcp": {
       "type": "stdio",
-      "command": "${workspaceFolder}\\ModelDeskMCP.cmd",
-      "args": [],
+      "command": "py",
+      "args": ["-3.14", "${workspaceFolder}\\server.py"],
       "cwd": "${workspaceFolder}"
     }
   }
 }
 ```
 
-The matching source-checkout launcher is:
-
-```bat
-@echo off
-setlocal
-set "ROOT=%~dp0"
-cd /d "%ROOT%"
-py -3.14 -m modeldesk_mcp.server %*
-exit /b %ERRORLEVEL%
-```
-
-The launcher forwards all arguments with `%*`. When no arguments are provided, the server starts in stdio mode.
+When no additional arguments are provided, the server starts in stdio mode.
 
 ## Typical safe workflow
 
@@ -95,10 +84,10 @@ py -3.14 -m pip install -e ".[test]"
 py -3.14 -m compileall src server.py
 py -3.14 -m pytest -q
 py -3.14 -m modeldesk_mcp.smoke --skip-com-status
-.\ModelDeskMCP.cmd --help
+py -3.14 server.py --help
 ```
 
-Use the launcher directly in MCP clients; the check commands validate the source checkout without requiring a live ModelDesk connection.
+Use the Python command directly in MCP clients; the check commands validate the source checkout without requiring a live ModelDesk connection.
 
 ## Configuration table
 
@@ -106,7 +95,7 @@ Use the launcher directly in MCP clients; the check commands validate the source
 | --- | --- | --- |
 | Runtime | Python 3.14 | Required for the Windows server checkout |
 | Transport | stdio | Local MCP transport over stdin/stdout |
-| Launcher | `ModelDeskMCP.cmd` | Source-checkout entry point in the repo root |
+| Invocation | `py -3.14 server.py` | Direct source-checkout entry point |
 | Client entry | `.vscode/mcp.json` | Example local VS Code configuration |
 | COM dependency | Local ModelDesk installation | Required for COM-backed operations |
 | Testing mode | COM-free smoke + pytest | No live COM required for verification |
@@ -136,8 +125,8 @@ The source checkout is the authoritative install path for development. The repos
 
 ## Troubleshooting
 
-- `py` is not recognized: install Python 3.14 and ensure the launcher can find `py` on PATH.
-- Client cannot start the server: confirm the path in the MCP config points to the repository root and that `ModelDeskMCP.cmd` exists.
+- `py` is not recognized: install Python 3.14 and ensure `py` is available on PATH.
+- Client cannot start the server: confirm that the MCP configuration uses the repository root as `cwd` and invokes `py -3.14 server.py`.
 - COM calls fail: confirm ModelDesk is installed, registered, and accessible on the local machine.
 - Smoke checks fail before COM is used: verify the editable install and run `python -m pytest -q` to isolate a deterministic failure.
 - Client requests are rejected: verify that the tool name matches the public registry contract and that the client is not using a stale config file.
