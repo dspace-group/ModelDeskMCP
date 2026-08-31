@@ -1,6 +1,6 @@
 """Canonical mapping of MCP tool names to ModelDesk use cases.
 
-The five documented use cases live in ``ModelDesk/doc/use-cases.md``:
+The five documented use cases live in ``docs/use-cases.md``:
 
 - UC1: Parameterize ASM-Based Vehicle Models
 - UC2: Build Roads for Simulation and Visualization
