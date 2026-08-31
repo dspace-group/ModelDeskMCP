@@ -141,4 +141,5 @@ The source checkout is the authoritative install path for development. The repos
 
 ## Support
 
-This repository is a source-only server checkout for local ModelDesk automation. Support is limited to the public server contract and the documentation in this repo. ModelDesk licensing, local project content, and machine-level COM setup remain the responsibility of the local environment and the ModelDesk installation itself.
+For technical questions and issues related to the dSPACE MCP Servers and related GitHub repositories, please open a GitHub issue.
+As a valued dSPACE customer, you are always welcome to contact dSPACE Support directly via http://www.dspace.com/go/supportrequest.
