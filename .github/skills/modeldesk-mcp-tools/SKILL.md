@@ -66,9 +66,13 @@ Use this general sequence unless the returned workflow plan gives a more specifi
 6. Re-read summaries/lists and report the structured result.
 7. Save or download only when explicitly requested.
 8. Run processing, tests, plotting, or synchronization only after the active context is verified.
-9. Close the project at session end, following the persistence instruction.
+9. Close a project opened by the current workflow at session end only when closing was authorized; leave a pre-existing active project open.
 
 For common workflows, keep the domain order coherent: parameterize a vehicle variant before processing and saving its parameter set; create or activate a road before road authoring; create or activate a scenario before fellows and maneuvers; resolve traffic-object references before assigning them; activate plotting before listing captures or layouts; and prepare the active experiment before synchronization. Regression execution requires an activated test and an explicit scope.
+
+## Capture comparison
+
+Discover capture names with `modeldesk_list_plot_captures` before comparing them. Pass file names such as `reference.mat`, never absolute or relative directory paths: the server resolves each name under `Application.ActiveProject.WorkingRoot/Pool/Simulation/Measurements`, so the active project controls the location. Use `signalSpecsJson` as a JSON array; `[]` compares every common signal, string entries select equal names, and objects can map `reference` to `candidate`. Use `tolerancesJson` as a JSON object with optional `meanAbsoluteError`, `rootMeanSquaredError`, and `maximumAbsoluteError` thresholds; a nested `signals` object overrides thresholds by reference signal name. Different increasing time rasters are aligned by interpolating the candidate onto reference timestamps in the shared time range. A tolerance verdict requires at least two finite overlapping samples; otherwise the result is `notEvaluated` with status `insufficientOverlap`.
 
 ## Structured results and recovery
 
@@ -80,7 +84,7 @@ Keep every long-running operation within the configured timeout. Processing, tes
 
 ## Safe cleanup
 
-Close the active project when the session is complete or before switching to another project. Save first only when explicitly requested or already authorized by the workflow. Do not remove temporary or project assets as an unrequested cleanup step. Leave the active system in a known state, and use stop or reset only when the user asked for it or the workflow explicitly requires it.
+Close only a project opened by the current workflow, and only when closing was authorized; leave a pre-existing active project open. Save first only when explicitly requested or already authorized by the workflow. Do not remove temporary or project assets as an unrequested cleanup step. Leave the active system in a known state, and use stop or reset only when the user asked for it or the workflow explicitly requires it.
 
 ## Complete Tool Index
 
@@ -176,7 +180,7 @@ Close the active project when the session is complete or before switching to ano
 | `modeldesk_activate_plotting` | Activate plotting configuration by selector before capture/layout listing. |
 | `modeldesk_list_plot_captures` | List captures in active plotting configuration. |
 | `modeldesk_list_plot_layouts` | List plot layouts in active plotting configuration. |
-| `modeldesk_compare_captures` | Compare two captures (currently capability placeholder until numeric backend is available). |
+| `modeldesk_compare_captures` | Compare project-pool MATLAB captures with signal selection and numeric tolerances. |
 
 ### TrafficObjectManager/TrafficObject/TOM
 

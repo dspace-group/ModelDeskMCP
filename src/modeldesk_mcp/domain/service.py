@@ -508,10 +508,21 @@ class ModelDeskService:
 
         return self._gateway.list_plot_layouts()
 
-    def compare_captures(self) -> ToolResult:
-        """Return a disabled response for capture comparison."""
+    def compare_captures(
+        self,
+        reference_capture: str,
+        candidate_capture: str,
+        signal_specs_json: str,
+        tolerances_json: str,
+    ) -> ToolResult:
+        """Compare two MATLAB captures from the active project's measurement pool."""
 
-        return self._gateway.create_unsupported_result("modeldesk_compare_captures", "Numeric capture comparison is not implemented in the Python MCP server yet because no deterministic capture data backend has been selected.")
+        return self._gateway.compare_captures(
+            reference_capture,
+            candidate_capture,
+            signal_specs_json,
+            tolerances_json,
+        )
 
     def save_active_experiment(self) -> ToolResult:
         """Save active experiment."""
@@ -588,7 +599,7 @@ class ModelDeskService:
             return self._validation_failure(operation_name, public_error_message(exception))
 
     def _validation_failure(self, operation_name: str, message: str) -> ToolResult:
-        return self._gateway.create_unsupported_result(operation_name, message) if operation_name == "modeldesk_compare_captures" else _validation_failure(self._gateway.session_id, operation_name, message)
+        return _validation_failure(self._gateway.session_id, operation_name, message)
 
 
 def _validation_failure(session_id: str, operation_name: str, message: str) -> ToolResult:

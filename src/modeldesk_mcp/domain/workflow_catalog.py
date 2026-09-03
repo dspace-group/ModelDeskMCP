@@ -191,8 +191,8 @@ def _create_plotting_plan() -> WorkflowPlan:
         "Activate plotting configuration.",
         "Read capture and layout summary.",
         "List captures and layouts for explicit comparison setup.",
-        "Open capture comparison once a numeric backend is selected.",
-        "Return comparison report artifacts.",
+        "Compare selected capture signals with explicit numeric tolerances.",
+        "Return structured comparison metrics and the tolerance verdict.",
     )
     tools = (
         "modeldesk_activate_plotting",
@@ -201,7 +201,7 @@ def _create_plotting_plan() -> WorkflowPlan:
         "modeldesk_list_plot_layouts",
         "modeldesk_compare_captures",
     )
-    return WorkflowPlan("plot_and_compare_two_runs", "UC5", True, steps, tools, "UC5 Analyze and Compare Simulation Results. Numeric comparison is currently a planned capability with a disabled tool response.")
+    return WorkflowPlan("plot_and_compare_two_runs", "UC5", True, steps, tools, "UC5 Analyze and Compare Simulation Results using MATLAB captures from the active project's measurement pool.")
 
 
 def _create_aurelion_plan() -> WorkflowPlan:

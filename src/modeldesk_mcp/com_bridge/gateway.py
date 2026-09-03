@@ -156,10 +156,13 @@ class ModelDeskAutomationGateway:
             raise ValueError("dispatcher must not be None")
         if options is None:
             raise ValueError("options must not be None")
+        from modeldesk_mcp.domain.capture_comparison import compare_capture_files
+
         self._dispatcher = dispatcher
         self._options = options
         self._session_id = uuid.uuid4().hex
         self._application: Any | None = None
+        self._compare_capture_files = compare_capture_files
 
     @property
     def session_id(self) -> str:
@@ -810,12 +813,54 @@ class ModelDeskAutomationGateway:
     def list_plot_captures(self) -> ToolResult:
         """List captures in the active plotting configuration."""
 
-        return self._execute_com("modeldesk_list_plot_captures", lambda application: self._create_collection_summary("plotting.captures", _get_required_property(_get_active_plotting(application), "Captures"), "capture"))
+        return self._execute_com(
+            "modeldesk_list_plot_captures",
+            lambda application: self._create_first_available_collection_summary(
+                "plotting.captures",
+                _get_required_property(_get_active_plotting(application), "Captures"),
+                "capture",
+                "OpenCaptures",
+                "AvailableElements",
+            ),
+        )
 
     def list_plot_layouts(self) -> ToolResult:
         """List plot layouts in the active plotting configuration."""
 
-        return self._execute_com("modeldesk_list_plot_layouts", lambda application: self._create_first_available_collection_summary("plotting.layouts", _get_active_plotting(application), "plot layout", "ActiveLayouts", "Layouts", "LayoutConfiguration"))
+        return self._execute_com(
+            "modeldesk_list_plot_layouts",
+            lambda application: self._create_first_available_collection_summary(
+                "plotting.layouts",
+                _get_required_property(_get_active_plotting(application), "Layouts"),
+                "plot layout",
+                "ActiveLayouts",
+                "AvailableElements",
+            ),
+        )
+
+    def compare_captures(
+        self,
+        reference_capture: str,
+        candidate_capture: str,
+        signal_specs_json: str,
+        tolerances_json: str,
+    ) -> ToolResult:
+        """Compare two MATLAB captures from the active project's measurement pool."""
+
+        def operation(application: Any) -> dict[str, Any]:
+            project = _get_active_project(application)
+            working_root = com.get_string_property(project, "WorkingRoot")
+            if working_root is None or working_root.strip() == "":
+                raise ValueError("Application.ActiveProject.WorkingRoot is not available.")
+            return self._compare_capture_files(
+                working_root,
+                reference_capture,
+                candidate_capture,
+                signal_specs_json,
+                tolerances_json,
+            )
+
+        return self._execute_com("modeldesk_compare_captures", operation)
 
     def save_active_experiment(self) -> ToolResult:
         """Save the active experiment."""
@@ -882,12 +927,6 @@ class ModelDeskAutomationGateway:
 
         return self._execute_com("modeldesk_synchronize_aurelion", operation)
 
-    def create_unsupported_result(self, operation_name: str, message: str) -> ToolResult:
-        """Create a structured capability-unavailable result."""
-
-        error = ToolError("capability_unavailable", message, operation_name, "Check capabilities and implement the missing backend before using this tool.")
-        return ToolResult.failure(operation_name, self._session_id, error)
-
     def _execute_com(self, operation_name: str, operation: Callable[[Any], Any]) -> ToolResult:
         try:
             result = self._dispatcher.invoke(lambda: operation(self._get_or_create_application()), self._options.operation_timeout_seconds)
@@ -943,13 +982,12 @@ class ModelDeskAutomationGateway:
             "testCaseInspection": _can_resolve_domain(application, ModelDeskDomain.TESTING),
             "plotting": _can_resolve_domain(application, ModelDeskDomain.PLOTTING),
             "plotArtifactInspection": _can_resolve_domain(application, ModelDeskDomain.PLOTTING),
-            "comparison": False,
+            "comparison": True,
             "automationJobs": False,
             "workflow": True,
         }
         disabled = (
             "Traffic object catalog mutation (AddTrafficObject, RemoveTrafficObject, AddFolder, RemoveFolder) is COM-capable but not yet exposed as MCP tools.",
-            "Numeric capture comparison is disabled until a capture data backend is selected.",
             "Persistent automation jobs are disabled until the job registry is implemented.",
         )
         python_version = f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
@@ -1039,9 +1077,28 @@ class ModelDeskAutomationGateway:
             test = _get_required_property(_get_active_experiment(application), "Test")
             return self._create_object_summary("testing", test, com.read_properties(test, "Name", "Verdict"), "LogicalTestCases", "ConcreteTestCases")
         if domain == ModelDeskDomain.PLOTTING:
-            plotting = _get_required_property(_get_active_experiment(application), "Plotting")
-            return self._create_object_summary("plotting", plotting, com.read_properties(plotting, "Name"), "Captures", "ActiveLayouts", "LayoutConfiguration")
+            return self._create_plotting_summary(application)
         raise ValueError(f"Domain '{domain.value}' is not a COM-backed summary domain.")
+
+    def _create_plotting_summary(self, application: Any) -> DomainSummary:
+        plotting = _get_active_plotting(application)
+        properties = com.read_properties(plotting, "Name")
+        nested_collections = (
+            ("captures.open", _get_required_property(plotting, "Captures"), "OpenCaptures"),
+            ("layouts.active", _get_required_property(plotting, "Layouts"), "ActiveLayouts"),
+            ("signals.simulation", plotting, "SimulationSignals"),
+        )
+        for label, instance, property_name in nested_collections:
+            has_collection, collection = com.try_get_property(instance, property_name)
+            if not has_collection or collection is None:
+                properties[f"collection.{label}.available"] = "False"
+                continue
+            try:
+                properties[f"collection.{label}.count"] = str(com.snapshot_collection(collection, label, self._options.max_collection_items).count)
+            except Exception as exception:  # noqa: BLE001 - records late-bound collection failures.
+                properties[f"collection.{label}.error"] = public_error_message(exception)
+        item = ItemSummary(0, com.read_display_name(plotting, "plotting", 0), com.get_string_property(plotting, "TypeName"), com.get_string_property(plotting, "Path"))
+        return DomainSummary("plotting", True, 1, (item,), properties)
 
     def _get_parameter_value_core(self, application: Any, parameter_path: str) -> ParameterValueInfo:
         parameter = self._find_parameter(application, parameter_path)

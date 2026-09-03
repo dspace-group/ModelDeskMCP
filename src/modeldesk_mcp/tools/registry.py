@@ -613,10 +613,9 @@ def register_tools(mcp: Any, service: ModelDeskService) -> None:
 
     @mcp.tool(name="modeldesk_compare_captures")
     def modeldesk_compare_captures(referenceCapture: str, candidateCapture: str, signalSpecsJson: str, tolerancesJson: str) -> dict[str, Any]:
-        """Compare two captures (currently capability placeholder until numeric backend is available)."""
+        """Compare project-pool MATLAB captures with signal selection and numeric tolerances."""
 
-        _ = (referenceCapture, candidateCapture, signalSpecsJson, tolerancesJson)
-        return _to_dict(service.compare_captures())
+        return _to_dict(service.compare_captures(referenceCapture, candidateCapture, signalSpecsJson, tolerancesJson))
 
     @mcp.tool(name="modeldesk_start_maneuver")
     def modeldesk_start_maneuver(downloadIfNotRunning: bool = True) -> dict[str, Any]:

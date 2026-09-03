@@ -100,14 +100,24 @@ def snapshot_collection(collection: Any, item_kind: str, max_items: int) -> Coll
 
     if max_items <= 0:
         raise ValueError("Maximum item count must be greater than zero.")
-    count = get_count(collection)
+    is_sequence = isinstance(collection, (tuple, list))
+    count = len(collection) if is_sequence else get_count(collection)
     item_count = min(count, max_items)
     items: list[ItemSummary] = []
     for item_index in range(item_count):
-        item = invoke_item(collection, item_index)
-        name = f"{item_kind} {item_index}" if item is None else read_display_name(item, item_kind, item_index)
-        path = None if item is None else get_first_string_property(item, "Path", "CompleteName", "FileName")
-        kind = item_kind if item is None else get_first_string_property(item, "TypeName", "Kind", "ObjectType")
+        item = collection[item_index] if is_sequence else invoke_item(collection, item_index)
+        if item is None:
+            name = f"{item_kind} {item_index}"
+            path = None
+            kind = item_kind
+        elif isinstance(item, (str, int, float, bool)):
+            name = str(item)
+            path = None
+            kind = item_kind
+        else:
+            name = read_display_name(item, item_kind, item_index)
+            path = get_first_string_property(item, "Path", "CompleteName", "FileName")
+            kind = get_first_string_property(item, "TypeName", "Kind", "ObjectType")
         items.append(ItemSummary(item_index, name, kind, path))
     return CollectionSnapshot(count, tuple(items), count > item_count)
 

@@ -80,12 +80,12 @@ The Plot Manager provides layouts and plotters for monitoring signals and compar
 
 As a Customer/User of ModelDesk, I want to inspect and compare simulation signals after a run so that I can understand whether parameter, road, or scenario changes improved or degraded behavior.
 
-For the MCP server scope, this use case must include selecting plotting configurations, listing captures and layouts, identifying signals, and eventually comparing numeric results with explicit tolerances. Plotting and comparison tools should return structured summaries and artifact references instead of only opening UI views.
+For the MCP server scope, this use case includes selecting plotting configurations, listing captures and layouts, identifying signals, and comparing MATLAB capture results with explicit tolerances. Capture file names are resolved from the active project's `WorkingRoot` under `Pool/Simulation/Measurements`; clients do not provide machine-specific absolute paths. Plotting and comparison tools return structured summaries, alignment details, numeric error metrics, and tolerance verdicts instead of only opening UI views.
 
 Typical outcomes:
 
 - signal trend comparison
 - run-to-run regression analysis
 - quick inspection during calibration and validation loops
-- tolerance-based comparison of relevant signals once capture data extraction is available
+- tolerance-based comparison of relevant signals from project-pool MATLAB captures
 - result artifacts that can be attached to automated validation reports
