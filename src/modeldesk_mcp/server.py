@@ -1,4 +1,4 @@
-"""FastMCP stdio server for ModelDesk Automation."""
+"""MCPServer stdio server for ModelDesk Automation."""
 
 from __future__ import annotations
 
@@ -7,10 +7,10 @@ import argparse
 from modeldesk_mcp import __version__
 
 
-def create_app() -> "FastMCP":
-    """Create a configured FastMCP server instance."""
+def create_app() -> "MCPServer":
+    """Create a configured MCPServer instance."""
 
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
 
     from modeldesk_mcp.com_bridge import ComStaDispatcher, ModelDeskAutomationGateway
     from modeldesk_mcp.config import ComGatewayOptions
@@ -21,7 +21,7 @@ def create_app() -> "FastMCP":
     dispatcher = ComStaDispatcher()
     gateway = ModelDeskAutomationGateway(dispatcher, options)
     service = ModelDeskService(gateway, WorkflowCatalog())
-    mcp = FastMCP("ModelDesk Automation")
+    mcp = MCPServer("ModelDesk Automation")
     register_tools(mcp, service)
     return mcp
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-from datetime import timedelta
 from pathlib import Path
 import sys
 from typing import Any
@@ -41,7 +40,7 @@ async def _run_smoke(options: SmokeOptions) -> None:
     project_root = Path(__file__).resolve().parents[2]
     parameters = StdioServerParameters(command=sys.executable, args=["server.py"], cwd=project_root)
     async with stdio_client(parameters) as (read_stream, write_stream):
-        timeout = timedelta(seconds=options.timeout_seconds)
+        timeout = float(options.timeout_seconds)
         async with ClientSession(read_stream, write_stream, read_timeout_seconds=timeout) as session:
             await session.initialize()
             tools_result = await session.list_tools()
