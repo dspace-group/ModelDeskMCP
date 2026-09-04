@@ -475,10 +475,13 @@ class ModelDeskService:
 
         return self._gateway.list_logical_test_cases()
 
-    def list_concrete_test_cases(self) -> ToolResult:
-        """List concrete test cases."""
+    def list_concrete_test_cases(self, logical_test_case_selector_kind: str, logical_test_case_selector_value: str) -> ToolResult:
+        """List concrete test cases for one logical test case."""
 
-        return self._gateway.list_concrete_test_cases()
+        logical_test_case_selector = self._create_selector("modeldesk_list_concrete_test_cases", logical_test_case_selector_kind, logical_test_case_selector_value)
+        if isinstance(logical_test_case_selector, ToolResult):
+            return logical_test_case_selector
+        return self._gateway.list_concrete_test_cases(logical_test_case_selector)
 
     def execute_test(self, scope: str, selector_kind: str | None, selector_value: str | None) -> ToolResult:
         """Execute a test scope."""

@@ -576,10 +576,10 @@ def register_tools(mcp: Any, service: ModelDeskService) -> None:
         return _to_dict(service.list_logical_test_cases())
 
     @mcp.tool(name="modeldesk_list_concrete_test_cases")
-    def modeldesk_list_concrete_test_cases() -> dict[str, Any]:
-        """List concrete test cases from active test configuration."""
+    def modeldesk_list_concrete_test_cases(logicalTestCaseSelectorKind: str = "index", logicalTestCaseSelectorValue: str = "0") -> dict[str, Any]:
+        """List concrete test cases for one logical test case (defaults to index 0) of the active test configuration."""
 
-        return _to_dict(service.list_concrete_test_cases())
+        return _to_dict(service.list_concrete_test_cases(logicalTestCaseSelectorKind, logicalTestCaseSelectorValue))
 
     @mcp.tool(name="modeldesk_execute_test")
     def modeldesk_execute_test(scope: str = "test", selectorKind: str | None = None, selectorValue: str | None = None) -> dict[str, Any]:

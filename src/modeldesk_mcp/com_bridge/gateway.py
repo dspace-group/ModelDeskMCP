@@ -578,7 +578,8 @@ class ModelDeskAutomationGateway:
 
         def operation(application: Any) -> OperationInfo:
             fellows = _get_scenario_fellows_collection(application)
-            _remove_collection_item(fellows, fellow_selector, "fellow")
+            index_selector = _fellow_selector_to_index_selector(fellows, fellow_selector)
+            _remove_collection_item(fellows, index_selector, "fellow")
             details = {"fellowSelectorKind": fellow_selector.by.value, "fellowSelectorValue": fellow_selector.value}
             _apply_scenario_save_download(application, save, download, details)
             return OperationInfo("modeldesk_remove_scenario_fellow", True, "Scenario fellow removed.", details)
@@ -795,10 +796,26 @@ class ModelDeskAutomationGateway:
 
         return self._execute_com("modeldesk_list_logical_test_cases", lambda application: self._create_collection_summary("testing.logicalTestCases", _get_required_property(_get_active_test(application), "LogicalTestCases"), "logical test case"))
 
-    def list_concrete_test_cases(self) -> ToolResult:
-        """List concrete test cases."""
+    def list_concrete_test_cases(self, logical_test_case_selector: Selector) -> ToolResult:
+        """List concrete test cases for one logical test case of the active test configuration."""
 
-        return self._execute_com("modeldesk_list_concrete_test_cases", lambda application: self._create_collection_summary("testing.concreteTestCases", _get_required_property(_get_active_test(application), "ConcreteTestCases"), "concrete test case"))
+        if logical_test_case_selector.by == SelectorKind.ACTIVE:
+            return self._validation_failure("modeldesk_list_concrete_test_cases", "Logical test case selector must not use active.")
+
+        def operation(application: Any) -> DomainSummary:
+            # ConcreteTestCases is a property of each LogicalTestCase, not of the
+            # active Test root object, so the logical test case must be resolved first.
+            logical_test_cases = _get_required_property(_get_active_test(application), "LogicalTestCases")
+            logical_test_case = com.resolve_item(logical_test_cases, logical_test_case_selector)
+            concrete_test_cases = _get_required_property(logical_test_case, "ConcreteTestCases")
+            summary = self._create_collection_summary("testing.concreteTestCases", concrete_test_cases, "concrete test case")
+            properties = dict(summary.properties)
+            properties["logicalTestCaseSelectorKind"] = logical_test_case_selector.by.value
+            properties["logicalTestCaseSelectorValue"] = logical_test_case_selector.value
+            properties["logicalTestCaseName"] = com.get_string_property(logical_test_case, "Name")
+            return DomainSummary(summary.domain, summary.available, summary.count, summary.items, properties, summary.message)
+
+        return self._execute_com("modeldesk_list_concrete_test_cases", operation)
 
     def activate_plotting(self, selector: Selector) -> ToolResult:
         """Activate a plotting configuration by selector."""
@@ -1313,7 +1330,7 @@ class ModelDeskAutomationGateway:
     def _add_scenario_fellow_core(self, application: Any, fellow_selector: Selector, name: str | None, properties_json: str | None, traffic_object_selector: Selector | None, traffic_object_catalog_path: str | None, traffic_driver_reference: str | None, save: bool, download: bool) -> OperationInfo:
         fellows = _get_scenario_fellows_collection(application)
         add_mode = fellow_selector.by == SelectorKind.ACTIVE
-        fellow = _invoke_required_method(fellows, "Add") if add_mode else com.resolve_item(fellows, fellow_selector)
+        fellow = _invoke_required_method(fellows, "Add") if add_mode else _resolve_fellow(fellows, fellow_selector)
         normalized_name = _normalize_optional_text(name)
         if normalized_name is not None:
             com.set_property(fellow, "Name", normalized_name)
@@ -1727,12 +1744,48 @@ def _get_scenario_fellows_collection(application: Any) -> Any:
     return _get_first_available_property(_get_active_traffic_scenario(application), "Fellows", "TrafficParticipants", "Participants")
 
 
+def _resolve_fellow_index_by_name(fellows: Any, name: str) -> int:
+    """Resolve a fellow's 0-based collection position by its plain Name.
+
+    ModelDesk's Fellows.Item(string)/Remove(string) only match against
+    CompleteName ("F{Index}: {Name}") or the bare "F{Index}" pattern, never
+    the plain Name that modeldesk_list_scenario_fellows exposes as a name
+    selector value, so a plain name must be resolved to a position here first.
+    """
+    count = com.get_count(fellows)
+    for index in range(count):
+        candidate = _invoke_required_item(fellows, index, "fellow")
+        if com.get_string_property(candidate, "Name") == name:
+            return index
+    raise RuntimeError(f"No fellow found with name '{name}'.")
+
+
+def _resolve_fellow(fellows: Any, fellow_selector: Selector) -> Any:
+    """Resolve a fellow selector against the Fellows collection."""
+
+    fellow_selector.validate()
+    if fellow_selector.by == SelectorKind.NAME:
+        index = _resolve_fellow_index_by_name(fellows, fellow_selector.value)
+        return _invoke_required_item(fellows, index, "fellow")
+    return com.resolve_item(fellows, fellow_selector)
+
+
+def _fellow_selector_to_index_selector(fellows: Any, fellow_selector: Selector) -> Selector:
+    """Return an index-based selector equivalent, translating a name selector first."""
+
+    if fellow_selector.by == SelectorKind.NAME:
+        return Selector(SelectorKind.INDEX, str(_resolve_fellow_index_by_name(fellows, fellow_selector.value)))
+    return fellow_selector
+
+
 def _get_scenario_maneuvers_collection(application: Any, fellow_selector: Selector) -> Any:
     if fellow_selector.by == SelectorKind.ACTIVE:
         return _get_first_available_property(_get_active_traffic_scenario(application), "Maneuvers", "Maneuver", "ManeuverSequence")
     fellows = _get_scenario_fellows_collection(application)
-    fellow = com.resolve_item(fellows, fellow_selector)
-    return _get_first_available_property(fellow, "Maneuvers", "Maneuver", "ManeuverSequence")
+    fellow = _resolve_fellow(fellows, fellow_selector)
+    # A fellow's maneuver-like data lives under Sequences, not under the ego's
+    # Maneuvers/Maneuver/ManeuverSequence property names (FellowAutomation has none of those).
+    return _get_first_available_property(fellow, "Sequences")
 
 
 def _get_vehicle_object_type_manager(application: Any, fellow_selector: Selector, maneuver_index: int) -> tuple[Any, str]:
@@ -1747,7 +1800,7 @@ def _get_vehicle_object_type_manager(application: Any, fellow_selector: Selector
         return type_manager, f"ego.maneuver[{maneuver_index}]"
     # Fellow: TrafficScenario.Fellows[i].TrafficObjectType
     fellows = _get_scenario_fellows_collection(application)
-    fellow = com.resolve_item(fellows, fellow_selector)
+    fellow = _resolve_fellow(fellows, fellow_selector)
     type_manager = _get_first_available_property(fellow, "TrafficObjectType", "ContourLineObjectType", "ObjectType")
     return type_manager, f"fellow[{fellow_selector.by.value}={fellow_selector.value}]"
 

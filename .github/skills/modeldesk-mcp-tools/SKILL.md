@@ -1,6 +1,7 @@
 ---
 name: modeldesk-mcp-tools
 description: Use when an agent operates the local ModelDesk MCP server to inspect context, plan workflows, author project assets, process experiments, run tests, or compare results with explicit user intent and structured recovery.
+version: 1.0.0
 ---
 
 # ModelDesk MCP Tools
@@ -86,6 +87,17 @@ Keep every long-running operation within the configured timeout. Processing, tes
 
 Close only a project opened by the current workflow, and only when closing was authorized; leave a pre-existing active project open. Save first only when explicitly requested or already authorized by the workflow. Do not remove temporary or project assets as an unrequested cleanup step. Leave the active system in a known state, and use stop or reset only when the user asked for it or the workflow explicitly requires it.
 
+## Behavior notes
+
+- Never place a dependent read in the same parallel tool-call batch as the write it depends on, even when the write already reported success — a collection list issued too early can return a stale snapshot (e.g. a just-removed road still listed). Wait for the write's result, then issue the read as its own call.
+- `add_road_segment`/`update_road_segment` responses report `segmentIndex` as a 1-based ordinal, but the `segmentIndex` input parameter to `update_road_segment`/`remove_road_segment` is 0-based. Never feed a response's `segmentIndex` back into a later call; track your own 0-based counter starting at 0 for the road's default segment.
+- Fellow selectors accept both `selectorKind="index"` and `selectorKind="name"` reliably across every fellow-scoped tool (add/update/remove, maneuvers, activities, vehicle object type).
+- A freshly created fellow (`add_scenario_fellow`) cannot yet be given a verified traffic-driver reference: `update_scenario_fellow(trafficDriverReference=...)` expects a relative path in a format no MCP tool currently exposes for discovery. Treat `trafficDriverReference` as unverified until a discovery tool exists.
+- `list_concrete_test_cases` scopes to one logical test case via `logicalTestCaseSelectorKind`/`logicalTestCaseSelectorValue` (defaults to the first logical test case, `index`/`0`).
+- `create_basic_road` is not atomic: if `trafficObjectsJson` references a catalog path that cannot be resolved, the call reports `ok:false` but the road itself is still created. Always re-list roads after any failed `create_basic_road` call and remove the orphaned road by name before retrying.
+- The Traffic Object Manager (TOM) catalog (`list_traffic_objects`/`get_traffic_objects_summary`) is separate from the filesystem-backed Environment Pool `Objects` group — TOM can legitimately be empty (count 0) even when the Environment Pool lists hundreds of files. Check `get_capabilities().trafficObjectCatalogMutation` before assuming a name from the Environment Pool listing can be validated or assigned; if mutation is disabled, `validate_traffic_object_reference` fails closed for every name.
+- Some tool errors leak raw, unredacted COM exception text through `error.message` instead of a structured message. Do not parse `error.message` for control flow; branch only on `errorType`.
+
 ## Complete Tool Index
 
 <!-- BEGIN TOOL INDEX -->
@@ -119,7 +131,7 @@ Close only a project opened by the current workflow, and only when closing was a
 | `modeldesk_get_test_summary` | Read active test configuration summary before test listing or execution. |
 | `modeldesk_activate_test` | Activate test configuration by name before listing/executing cases. |
 | `modeldesk_list_logical_test_cases` | List logical test cases from active test configuration. |
-| `modeldesk_list_concrete_test_cases` | List concrete test cases from active test configuration. |
+| `modeldesk_list_concrete_test_cases` | List concrete test cases for one logical test case (`logicalTestCaseSelectorKind`/`logicalTestCaseSelectorValue`, defaults to `index`/`0`, i.e. the first logical test case). |
 | `modeldesk_execute_test` | Execute full active test or selected logical case based on `scope` and selector arguments. |
 | `modeldesk_synchronize_aurelion` | Synchronize active scene to AURELION with optional system/scenario routing values. |
 | `modeldesk_get_workflow_plan` | Return dry-run workflow recipe (ordered lower-level tool calls) for planning. |
@@ -134,17 +146,17 @@ Close only a project opened by the current workflow, and only when closing was a
 | `modeldesk_activate_scenario` | Activate scenario by name before scenario-scoped read/write tools. |
 | `modeldesk_list_scenario_fellows` | List fellows/participants and selectors for follow-up update/remove/maneuver calls. |
 | `modeldesk_list_scenario_maneuvers` | List maneuvers in active scenario to resolve selectors and indices for edits. |
-| `modeldesk_add_scenario_fellow` | Add fellow/participant with optional properties, traffic-object reference, and driver reference. |
-| `modeldesk_update_scenario_fellow` | Update selected fellow fields/references; prefer list -> select -> update flow. |
-| `modeldesk_remove_scenario_fellow` | Remove selected fellow from active scenario. |
-| `modeldesk_add_scenario_maneuver` | Add maneuver to active scenario scope (ego) or selected fellow scope. |
-| `modeldesk_update_scenario_maneuver` | Update selected maneuver using `propertiesJson` on ego or fellow scope. |
-| `modeldesk_remove_scenario_maneuver` | Remove selected maneuver from ego or selected fellow scope. |
-| `modeldesk_set_scenario_maneuver_sequence` | Set maneuver execution order using selector array JSON for ego or fellow scope. |
-| `modeldesk_set_maneuver_behavior_profiles` | Set longitudinal/lateral behavior profile JSON on selected maneuver. |
+| `modeldesk_add_scenario_fellow` | Add fellow/participant with optional properties, traffic-object reference, and driver reference. `trafficDriverReference` is unverified: the vendor API expects a relative path with no MCP discovery tool for it yet. |
+| `modeldesk_update_scenario_fellow` | Update selected fellow fields/references; prefer list -> select -> update flow. Both `selectorKind="index"` and `selectorKind="name"` are resolved reliably (name is translated to the fellow's collection index internally). |
+| `modeldesk_remove_scenario_fellow` | Remove selected fellow from active scenario. Both `selectorKind="index"` and `selectorKind="name"` are resolved reliably (name is translated to the fellow's collection index internally). |
+| `modeldesk_add_scenario_maneuver` | Add maneuver to active scenario scope (ego) or selected fellow scope. Fellow scope resolves through `Fellow.Sequences`; both ego/active and fellow scope are reliable. |
+| `modeldesk_update_scenario_maneuver` | Update selected maneuver using `propertiesJson` on ego or fellow scope. Both ego/active and fellow scope are reliable. |
+| `modeldesk_remove_scenario_maneuver` | Remove selected maneuver from ego or selected fellow scope. Both ego/active and fellow scope are reliable. |
+| `modeldesk_set_scenario_maneuver_sequence` | Set maneuver execution order using selector array JSON for ego or fellow scope. Both ego/active and fellow scope are reliable. |
+| `modeldesk_set_maneuver_behavior_profiles` | Set longitudinal/lateral behavior profile JSON on selected maneuver. Both ego/active and fellow scope are reliable. |
 | `modeldesk_get_scenario_road` | Read currently referenced road for the active scenario. |
 | `modeldesk_set_scenario_road` | Set scenario road reference by road name after validating available roads. |
-| `modeldesk_list_fellow_activities` | List activities for selected fellow or ego (`active` defaults) to discover maneuver targets. |
+| `modeldesk_list_fellow_activities` | List activities for selected fellow or ego (`active` defaults) to discover maneuver targets. Fellow scope resolves through `Fellow.Sequences`; both ego/active and fellow scope are reliable. |
 | `modeldesk_start_maneuver` | Start maneuver execution; optionally download experiment first if runtime is not running. |
 | `modeldesk_stop_maneuver` | Stop ongoing maneuver execution. |
 | `modeldesk_reset_maneuver` | Reset maneuver execution state to initial condition. |
@@ -161,16 +173,16 @@ Close only a project opened by the current workflow, and only when closing was a
 | `modeldesk_add_road` | Add a road and initialize first lane section; `save`/`download` should stay false unless explicitly requested. |
 | `modeldesk_update_road` | Update selected road properties (currently name); resolve selector from list output first. |
 | `modeldesk_remove_road` | Remove selected road from active network; verify selector to avoid accidental deletion. |
-| `modeldesk_add_road_segment` | Add typed segment (`Straight\|Circular\|Clothoid\|Spline`) to selected road using `propertiesJson`. |
-| `modeldesk_update_road_segment` | Update segment type and/or properties by `segmentIndex` on selected road. |
-| `modeldesk_remove_road_segment` | Remove one road segment by index from selected road. |
+| `modeldesk_add_road_segment` | Add typed segment (`Straight\|Circular\|Clothoid\|Spline`) to selected road using `propertiesJson`. Response `segmentIndex` is 1-based; do not reuse it as the 0-based input index for later calls. |
+| `modeldesk_update_road_segment` | Update segment type and/or properties by `segmentIndex` on selected road. `segmentIndex` here is 0-based, unlike the 1-based value in mutation responses. |
+| `modeldesk_remove_road_segment` | Remove one road segment by index from selected road. `segmentIndex` here is 0-based, unlike the 1-based value in mutation responses. |
 | `modeldesk_configure_road_lanes` | Configure lane counts/width (and optional length) for selected lane section. |
 | `modeldesk_add_road_object` | Add road-local traffic object at road-relative (`s`,`d`) with optional catalog/lane mapping. |
 | `modeldesk_update_road_object` | Update selected road-object fields using `propertiesJson` patch semantics. |
 | `modeldesk_remove_road_object` | Remove one road-local object by index from selected road. |
 | `modeldesk_connect_roads` | Connect source/target road endpoints; `mode` controls geometry adaptation (`Move` or `Modify`). |
 | `modeldesk_disconnect_road` | Disconnect selected road connection point (`Start` or `End`). |
-| `modeldesk_create_basic_road` | High-level helper: create straight road with lanes and optional traffic objects in one call. |
+| `modeldesk_create_basic_road` | High-level helper: create straight road with lanes and optional traffic objects in one call. Not atomic — a failed traffic-object placement can still leave the road created; re-list roads and remove the orphan before retrying. |
 
 ### Plotting/PlotManager
 
@@ -192,7 +204,7 @@ Close only a project opened by the current workflow, and only when closing was a
 | `modeldesk_get_traffic_objects_summary` | Read traffic-object catalog summary before object/folder operations. |
 | `modeldesk_list_traffic_objects` | List reusable traffic objects and selectors from Traffic Object Manager. |
 | `modeldesk_list_traffic_object_folders` | List catalog folders from Traffic Object Manager for path/selector discovery. |
-| `modeldesk_validate_traffic_object_reference` | Preflight check: validate traffic-object selector resolves before assignment to road/scenario. |
+| `modeldesk_validate_traffic_object_reference` | Preflight check: validate traffic-object selector resolves before assignment to road/scenario. Fails closed for every name when the TOM catalog is empty or `trafficObjectCatalogMutation` capability is disabled, even if the name exists in the Environment Pool. |
 | `modeldesk_add_traffic_object` | Add traffic object entry to Traffic Object Manager (when capability is enabled). |
 | `modeldesk_remove_traffic_object` | Remove traffic object by selector; verify target via listing first. |
 | `modeldesk_add_traffic_object_folder` | Add folder to Traffic Object Manager hierarchy. |

@@ -181,3 +181,82 @@ def test_summarize_type_elements_truncates_at_max_items() -> None:
     assert result.count == 10
     assert len(result.items) == 3
     assert result.message is not None
+
+
+# --- Fellow name-selector regression tests ---
+# ModelDesk's Fellows.Item(string)/Remove(string) only match CompleteName
+# ("F{Index}: {Name}") or "F{Index}", never the plain Name that
+# modeldesk_list_scenario_fellows exposes as a name selector value. These
+# helpers must translate a plain-name selector to the fellow's 0-based
+# collection position before any COM call is made.
+
+class _FakeFellow:
+    def __init__(self, name: str) -> None:
+        self.Name = name
+
+
+class _FakeFellowsCollection:
+    def __init__(self, names: list[str]) -> None:
+        self._fellows = [_FakeFellow(name) for name in names]
+
+    @property
+    def Count(self) -> int:
+        return len(self._fellows)
+
+    def Item(self, index: int) -> _FakeFellow:
+        return self._fellows[index]
+
+
+def test_resolve_fellow_index_by_name_finds_matching_plain_name() -> None:
+    from modeldesk_mcp.com_bridge.gateway import _resolve_fellow_index_by_name
+
+    fellows = _FakeFellowsCollection(["Truck1", "MCP_UC3_TestFellow"])
+
+    assert _resolve_fellow_index_by_name(fellows, "MCP_UC3_TestFellow") == 1
+
+
+def test_resolve_fellow_index_by_name_raises_for_unknown_name() -> None:
+    from modeldesk_mcp.com_bridge.gateway import _resolve_fellow_index_by_name
+
+    fellows = _FakeFellowsCollection(["Truck1"])
+
+    try:
+        _resolve_fellow_index_by_name(fellows, "DoesNotExist")
+        raise AssertionError("Expected RuntimeError for an unknown fellow name.")
+    except RuntimeError:
+        pass
+
+
+def test_resolve_fellow_translates_name_selector_to_matching_fellow() -> None:
+    from modeldesk_mcp.com_bridge.gateway import _resolve_fellow
+
+    fellows = _FakeFellowsCollection(["Truck1", "MCP_UC3_TestFellow"])
+    selector = Selector(SelectorKind.NAME, "MCP_UC3_TestFellow")
+
+    fellow = _resolve_fellow(fellows, selector)
+
+    assert fellow.Name == "MCP_UC3_TestFellow"
+
+
+def test_fellow_selector_to_index_selector_translates_name_to_index() -> None:
+    from modeldesk_mcp.com_bridge.gateway import _fellow_selector_to_index_selector
+
+    fellows = _FakeFellowsCollection(["Truck1", "MCP_UC3_TestFellow"])
+    selector = Selector(SelectorKind.NAME, "MCP_UC3_TestFellow")
+
+    index_selector = _fellow_selector_to_index_selector(fellows, selector)
+
+    assert index_selector.by == SelectorKind.INDEX
+    assert index_selector.to_com_value() == 1
+
+
+def test_fellow_selector_to_index_selector_passes_through_index_selector() -> None:
+    from modeldesk_mcp.com_bridge.gateway import _fellow_selector_to_index_selector
+
+    fellows = _FakeFellowsCollection(["Truck1"])
+    selector = Selector(SelectorKind.INDEX, "0")
+
+    index_selector = _fellow_selector_to_index_selector(fellows, selector)
+
+    assert index_selector is selector
+
