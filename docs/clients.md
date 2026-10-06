@@ -22,20 +22,15 @@ The server is designed for local MCP clients that start a stdio process on the c
 The root launcher uses a checkout-relative path and forwards all arguments unchanged:
 
 ```bat
-@echo off
-setlocal
-set "ROOT=%~dp0"
-cd /d "%ROOT%"
-py -3.14 -m modeldesk_mcp.server %*
-exit /b %ERRORLEVEL%
+@uv --directory "%~dp0." run python -m modeldesk_mcp.server %*
 ```
 
 When no arguments are supplied, the server starts in stdio mode. Metadata flags are part of the backend contract and are not used as a public launcher feature in this repo.
 
 ## Safe client workflow
 
-1. Install the checkout in editable mode.
-2. Verify the local Python and launcher are available.
+1. Run `uv sync` in the checkout.
+2. Verify that `uv` and the launcher are available.
 3. Run COM-free smoke checks before calling ModelDesk-backed tools.
 4. Start with read-only discovery and status tools.
 5. Back up project content before any tool that edits, saves, runs, or closes ModelDesk data.

@@ -11,7 +11,7 @@ The server is intended for local use in desktop MCP clients and editor integrati
 ## Prerequisites
 
 - Windows 10 or later
-- Python 3.14 installed through `py -3.14`
+- [`uv`](https://docs.astral.sh/uv/getting-started/installation/), which creates the environment, installs Python 3.14 if missing, and runs the server
 - ModelDesk installed and registered for COM automation where COM-backed tools will be used
 - An MCP-capable client that supports local stdio servers
 - A ModelDesk project or test content you can safely access and, when necessary, back up
@@ -20,32 +20,28 @@ No Docker, Node.js, or .NET runtime is required for the Python server itself.
 
 ## Source installation
 
-From a PowerShell prompt in this repository:
+From a shell in this repository:
 
 ```powershell
-py -3.14 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -e ".[test]"
+uv sync              # minimal setup
+uv sync --extra dev  # full developer setup (includes pytest)
 ```
-
-If activation is blocked, run the editable install directly with `py -3.14 -m pip install -e ".[test]"` and use `py -3.14` for the commands below.
 
 ## Local stdio behavior
 
-The server runs as a local stdio MCP process. When started without arguments, it listens on standard input/output for MCP requests. Start the source checkout directly with `py -3.14 server.py`; metadata-style CLI flags are part of the same backend contract.
+The server runs as a local stdio MCP process. When started without arguments, it listens on standard input/output for MCP requests. Start the source checkout directly with `ModelDeskMCP.cmd` or `uv run python server.py`; metadata-style CLI flags are part of the same backend contract.
 
 ## MCP client configuration
 
-The repository includes a VS Code example in `.vscode/mcp.json`. Run the Python entry point from the checkout root:
+The repository includes a VS Code example in `.vscode/mcp.json`. Call the `uv`-based launcher from the checkout root:
 
 ```json
 {
   "servers": {
     "modeldesk-mcp": {
       "type": "stdio",
-      "command": "py",
-      "args": ["-3.14", "${workspaceFolder}\\server.py"],
+      "command": "${workspaceFolder}\\ModelDeskMCP.cmd",
+      "args": [],
       "cwd": "${workspaceFolder}"
     }
   }
@@ -80,22 +76,22 @@ The public tool names are intentionally namespaced with the `modeldesk_` prefix 
 Run these commands from the repository root:
 
 ```powershell
-py -3.14 -m pip install -e ".[test]"
-py -3.14 -m compileall src server.py
-py -3.14 -m pytest -q
-py -3.14 -m modeldesk_mcp.smoke --skip-com-status
-py -3.14 server.py --help
+uv sync --extra dev
+uv run python -m compileall src server.py
+uv run pytest
+uv run python -m modeldesk_mcp.smoke --skip-com-status
+uv run python server.py --help
 ```
 
-Use the Python command directly in MCP clients; the check commands validate the source checkout without requiring a live ModelDesk connection.
+Use `ModelDeskMCP.cmd` in MCP clients; the check commands validate the source checkout without requiring a live ModelDesk connection.
 
 ## Configuration table
 
 | Item | Value | Notes |
 | --- | --- | --- |
-| Runtime | Python 3.14 | Required for the Windows server checkout |
+| Runtime | Python 3.14 via `uv` | Required for the Windows server checkout |
 | Transport | stdio | Local MCP transport over stdin/stdout |
-| Invocation | `py -3.14 server.py` | Direct source-checkout entry point |
+| Invocation | `ModelDeskMCP.cmd` | `uv run` launcher for the source checkout |
 | Client entry | `.vscode/mcp.json` | Example local VS Code configuration |
 | COM dependency | Local ModelDesk installation | Required for COM-backed operations |
 | Testing mode | COM-free smoke + pytest | No live COM required for verification |
@@ -116,19 +112,20 @@ This structure keeps COM access centralized and makes the server easier to valid
 ## Development and test commands
 
 ```powershell
-python -m compileall src server.py
-python -m pytest -q
-python -m modeldesk_mcp.smoke --skip-com-status
+uv run python -m compileall src server.py
+uv run pytest
+uv run python -m modeldesk_mcp.smoke --skip-com-status
+uv build   # build sdist and wheel
 ```
 
-The source checkout is the authoritative install path for development. The repository does not include an authoring package manager lockfile, generated release artifacts, or a separate packaging workflow.
+The source checkout is the authoritative install path for development. `uv.lock` pins the resolved dependencies.
 
 ## Troubleshooting
 
-- `py` is not recognized: install Python 3.14 and ensure `py` is available on PATH.
-- Client cannot start the server: confirm that the MCP configuration uses the repository root as `cwd` and invokes `py -3.14 server.py`.
+- `uv` is not recognized: install `uv` and ensure it is available on PATH.
+- Client cannot start the server: confirm that the MCP configuration invokes `ModelDeskMCP.cmd` from the repository root.
 - COM calls fail: confirm ModelDesk is installed, registered, and accessible on the local machine.
-- Smoke checks fail before COM is used: verify the editable install and run `python -m pytest -q` to isolate a deterministic failure.
+- Smoke checks fail before COM is used: run `uv sync --extra dev` and `uv run pytest` to isolate a deterministic failure.
 - Client requests are rejected: verify that the tool name matches the public registry contract and that the client is not using a stale config file.
 
 ## Documentation index
@@ -142,4 +139,4 @@ The source checkout is the authoritative install path for development. The repos
 ## Support
 
 For technical questions and issues related to the dSPACE MCP Servers and related GitHub repositories, please open a GitHub issue.
-As a valued dSPACE customer, you are always welcome to contact dSPACE Support directly via http://www.dspace.com/go/supportrequest.
+As a valued dSPACE customer, you are always welcome to contact dSPACE Support directly via <http://www.dspace.com/go/supportrequest>.
