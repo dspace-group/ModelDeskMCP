@@ -63,3 +63,4 @@ Desktop.ini
 *.tmp
 *.bak
 .tmp-*/
+uv.lock

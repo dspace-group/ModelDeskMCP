@@ -2,8 +2,8 @@
   "servers": {
     "modeldesk-mcp": {
       "type": "stdio",
-      "command": "py",
-      "args": ["-3.14", "${workspaceFolder}\\server.py"],
+      "command": "${workspaceFolder}\\ModelDeskMCP.cmd",
+      "args": [],
       "cwd": "${workspaceFolder}"
     }
   }
