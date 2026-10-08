@@ -17,6 +17,8 @@ jobs:
   test:
     runs-on: windows-latest
     timeout-minutes: 20
+    env:
+      UV_DEFAULT_INDEX: https://pypi.org/simple
 
     steps:
       - name: Check out repository
