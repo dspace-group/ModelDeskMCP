@@ -605,7 +605,8 @@ def test_ego_profile_rejects_empty_or_ambiguous_maneuver_sequences(
     )
 
 
-def test_scenario_maneuver_sequence_applies_requested_order() -> None:
+@pytest.mark.parametrize("save_download", (False, True))
+def test_scenario_maneuver_sequence_rejects_reordering_before_persistence(save_download: bool) -> None:
     class FakeManeuver:
         __slots__ = ("_index",)
 
@@ -617,9 +618,14 @@ def test_scenario_maneuver_sequence_applies_requested_order() -> None:
             return self._index
 
     maneuvers = _FakeComCollection([FakeManeuver(0), FakeManeuver(1)])
+    persistence_calls: list[str] = []
     application = SimpleNamespace(
         ActiveProject=SimpleNamespace(
-            ActiveExperiment=SimpleNamespace(TrafficScenario=SimpleNamespace(Maneuver=maneuvers))
+            Save=lambda: persistence_calls.append("save"),
+            ActiveExperiment=SimpleNamespace(
+                TrafficScenario=SimpleNamespace(Maneuver=maneuvers),
+                Download=lambda: persistence_calls.append("download"),
+            ),
         )
     )
     gateway = _gateway_for_application(application)
@@ -632,12 +638,15 @@ def test_scenario_maneuver_sequence_applies_requested_order() -> None:
                 {"selectorKind": "index", "selectorValue": "0"},
             ]
         ),
-        save=False,
-        download=False,
+        save=save_download,
+        download=save_download,
     )
 
-    assert result.ok
-    assert [maneuvers.Item(index).Index for index in range(maneuvers.Count)] == [1, 0]
+    assert not result.ok
+    assert result.error is not None
+    assert "reordering is unsupported" in result.error.message.lower()
+    assert [maneuvers.Item(index).Index for index in range(maneuvers.Count)] == [0, 1]
+    assert persistence_calls == []
 
 
 @pytest.mark.parametrize(
