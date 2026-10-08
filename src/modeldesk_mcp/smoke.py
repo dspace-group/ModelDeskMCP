@@ -1,4 +1,4 @@
-"""Smoke test client for the ModelDesk MCP stdio server."""
+"""Smoke-check MCP stdio discovery; the ModelDesk status probe is opt-in."""
 
 from __future__ import annotations
 

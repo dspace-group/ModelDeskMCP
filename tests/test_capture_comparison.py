@@ -87,6 +87,14 @@ def test_compare_capture_files_interpolates_candidate_time_raster(tmp_path: Path
     assert result["verdict"] == "passed"
 
 
+def test_compare_capture_files_rejects_nonfinite_metrics_from_finite_samples(tmp_path: Path) -> None:
+    _write_capture(tmp_path, "reference.mat", (-1e308, 0.0))
+    _write_capture(tmp_path, "candidate.mat", (1e308, 0.0))
+
+    with pytest.raises(ValueError, match="finite|overflow|represent"):
+        compare_capture_files(tmp_path, "reference.mat", "candidate.mat", "[]", '{"maximumAbsoluteError":1e308}')
+
+
 def test_gateway_uses_active_projects_working_root(tmp_path: Path) -> None:
     gateway = object.__new__(ModelDeskAutomationGateway)
     application = SimpleNamespace(ActiveProject=SimpleNamespace(WorkingRoot=str(tmp_path)))

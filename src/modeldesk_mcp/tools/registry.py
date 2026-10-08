@@ -12,11 +12,15 @@ the specialized domains.
 The wrappers below intentionally convert ``ToolResult`` objects to plain data;
 they do not call COM directly. COM access remains behind the service and
 ``modeldesk_mcp.com_bridge`` boundary.
+SDK-native field metadata documents the input properties, while a stable
+``ToolResultEnvelope`` leaves each operation's ``data`` contract flexible.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any, TypedDict, get_type_hints
+
+from pydantic import Field
 
 from modeldesk_mcp.contracts import ToolResult
 from modeldesk_mcp.domain import ModelDeskService
@@ -117,6 +121,147 @@ TOOL_DOMAINS = (
 )
 
 
+class ToolArtifactEnvelope(TypedDict):
+    """Stable artifact fields serialized by ``ToolResult.to_dict``."""
+
+    kind: str
+    path: str
+    description: str | None
+
+
+class ToolErrorEnvelope(TypedDict):
+    """Stable structured error fields serialized by ``ToolResult.to_dict``."""
+
+    errorType: str
+    message: str
+    operation: str
+    recovery: str | None
+    isRetryable: bool
+
+
+class ToolResultEnvelope(TypedDict):
+    """Shared lower-camel tool response; operation-specific data stays flexible."""
+
+    ok: bool
+    operation: str
+    sessionId: str
+    data: Any
+    warnings: list[str]
+    artifacts: list[ToolArtifactEnvelope]
+    error: ToolErrorEnvelope | None
+
+
+# Examples are omitted only for installed test names, whose valid values are
+# environment-specific; nullable references use null to show their safe omission.
+_INPUT_FIELD_METADATA: dict[str, tuple[str, tuple[Any, ...] | None]] = {
+    "candidateCapture": ("Candidate MAT capture file name in the active project's Measurements folder.", ("candidate.mat",)),
+    "catalogPath": ("Optional Traffic Object Manager catalog path; use a value returned by catalog listing, or null to leave it unchanged.", (None,)),
+    "connectionPoint": ("Road endpoint to disconnect: Start or End.", ("End",)),
+    "d": ("Lateral road-relative traffic-object offset in meters.", (-1.75,)),
+    "download": ("Whether to download the active experiment after the requested changes; false avoids runtime synchronization.", (False,)),
+    "downloadIfNotRunning": ("Whether to download the active experiment before starting a maneuver when it is not running.", (True,)),
+    "elementIndex": ("Zero-based vehicle-object type index returned by the type-list tool.", (0,)),
+    "fellowSelectorKind": ("Optional fellow selector kind; active identifies the ego, otherwise use index or name.", ("active",)),
+    "fellowSelectorValue": ("Value paired with the fellow selector; use active for the ego or a listed index/name value.", ("active",)),
+    "fileName": ("Absolute destination path for the saved Road Network; the path must end in .rd.", ("C:/ModelDesk/Projects/Vehicle/Roads/City.rd",)),
+    "fileType": ("Project-pool content type ID: 0 RoadNetwork, 1 TrafficScenario, 2 TestingTest, 3 LayoutConfiguration, 4 TrafficDriver.", ("0",)),
+    "group": ("Environment Pool group to inspect: Objects, Road, Scenario, or TrafficDriver.", ("Road",)),
+    "initialExperiment": ("Optional experiment name to activate after opening the project.", ("Baseline",)),
+    "initializationCommand": ("Optional model initialization command passed to SetActiveModel.", ("initialize_vehicle",)),
+    "insertAfterSegmentIndex": ("Zero-based segment index to insert after; -1 retains the tool's default placement behavior.", (-1,)),
+    "laneMappingJson": ("JSON array of lane indices for the road traffic object.", ("[1]",)),
+    "laneSectionIndex": ("Zero-based lane-section index in the selected road.", (0,)),
+    "laneSectionLength": ("Requested lane-section length in meters; 0.0 selects the operation's automatic length behavior.", (0.0,)),
+    "laneWidth": ("Lane width in meters.", (3.5,)),
+    "lateralProfileJson": ("JSON object of COM-defined lateral assignments; {} requests no lateral changes because this interface has no universal lateral schema.", ("{}",)),
+    "leftLaneCount": ("Number of left-side lanes to configure.", (1,)),
+    "length": ("Road or segment length in meters, as supported by the selected operation.", (100.0,)),
+    "logicalTestCaseSelectorKind": ("Selector kind for the logical test case: index or name.", ("index",)),
+    "logicalTestCaseSelectorValue": ("Value paired with logicalTestCaseSelectorKind; use a decimal string for an index.", ("0",)),
+    "longitudinalProfileJson": ("Ego-only initial properties: StartPosition (Start position on route, meters) and InitialLongitudinalVelocity (km/h). Fellows require explicit Position.YawAngleConstant.Constant or Velocity.Constant.Constant behavior-profile JSON; these are not aliases for ego initial properties.", ('{"StartPosition":70.0,"InitialLongitudinalVelocity":20.0}', '{"Position":{"YawAngleConstant":{"Constant":70.0}}}', '{"Velocity":{"Constant":{"Constant":20.0}}}')),
+    "maneuverIndex": ("Zero-based ego maneuver index used to read or set its vehicle object type.", (0,)),
+    "maneuverSelectorKind": ("Selector kind for a maneuver in the selected scope; use index or name.", ("index",)),
+    "maneuverSelectorValue": ("Value paired with maneuverSelectorKind; use a decimal string for an index.", ("0",)),
+    "maneuverSelectorsJson": ("JSON array of maneuver selectors. The current interface can confirm an existing order but cannot change it.", ('[{"selectorKind":"index","selectorValue":"0"}]',)),
+    "mlWorkingDirectory": ("Optional MATLAB working directory for the active model.", ("C:/models/work",)),
+    "mode": ("Road connection mode: Move or Modify.", ("Move",)),
+    "modelFilePath": ("Path to the model file to bind to the active experiment.", ("C:/models/vehicle.slx",)),
+    "name": ("Name to create or assign to the ModelDesk item; uniqueness and accepted characters are domain-specific.", ("Road",)),
+    "object3D": ("Traffic Object Manager 3D asset reference; empty is accepted for no 3D object.", ("Cube.obj",)),
+    "objectIndex": ("Zero-based road traffic-object index.", (0,)),
+    "overwriteExisting": ("Whether an existing project-pool file may be overwritten.", (False,)),
+    "parameterPath": ("Exact parameter path in the active parameter set.", ("Vehicle.Speed",)),
+    "platformName": ("Optional model platform name passed to SetActiveModel.", ("ASM",)),
+    "projectFile": ("Path to the ModelDesk project file (.prj) to open.", ("C:/ModelDesk/Projects/Vehicle/Vehicle.prj",)),
+    "propertiesJson": ("JSON object of tool-specific property changes; accepted names and values belong to the selected COM object. {} means no property assignments.", ("{}",)),
+    "recursive": ("Whether to include descendant items when listing an Environment Pool group.", (True,)),
+    "referenceCapture": ("Reference MAT capture file name in the active project's Measurements folder.", ("reference.mat",)),
+    "rightLaneCount": ("Number of right-side lanes to configure.", (1,)),
+    "roadName": ("Name of the Road Network road to assign to the active scenario.", ("Road",)),
+    "roadSelectorKind": ("Selector kind for a road in the active network; use index or name.", ("index",)),
+    "roadSelectorValue": ("Value paired with roadSelectorKind; use a decimal string for an index.", ("0",)),
+    "s": ("Longitudinal road-relative traffic-object position in meters.", (25.0,)),
+    "save": ("Whether to save the affected experiment after the requested changes; false avoids persistence.", (False,)),
+    "saveActive": ("Whether to save the currently active project or experiment before switching context.", (True,)),
+    "scenario": ("Optional installation-specific AURELION scenario routing value; null leaves selection to the connector.", (None,)),
+    "scenarioName": ("Exact scenario name to activate in the active experiment.", ("CutIn",)),
+    "scope": ("Test execution scope; test runs the complete active test configuration.", ("test",)),
+    "segmentIndex": ("Zero-based segment index on the selected road.", (0,)),
+    "segmentType": ("Road segment type: Straight, Circular, Clothoid, or Spline.", ("Straight",)),
+    "selectorKind": ("Selector kind for the target collection; use index or name where supported.", ("index",)),
+    "selectorValue": ("Value paired with selectorKind; use a decimal string for an index.", ("0",)),
+    "signalSpecsJson": ("JSON array of signal names or reference/candidate name objects; [] selects all common signal names.", ("[]",)),
+    "sourcePoint": ("Source road endpoint to connect: Start or End.", ("End",)),
+    "sourceRoadSelectorKind": ("Selector kind for the source road; use index or name.", ("index",)),
+    "sourceRoadSelectorValue": ("Value paired with sourceRoadSelectorKind; use a decimal string for an index.", ("0",)),
+    "system": ("Optional installation-specific AURELION system routing value; null leaves selection to the connector.", (None,)),
+    "targetPoint": ("Target road endpoint to connect: Start or End.", ("Start",)),
+    "targetRoadSelectorKind": ("Selector kind for the target road; use index or name.", ("index",)),
+    "targetRoadSelectorValue": ("Value paired with targetRoadSelectorKind; use a decimal string for an index.", ("1",)),
+    "testName": ("Exact name of a test configuration available in the installed ModelDesk project.", None),
+    "tolerancesJson": ("JSON object of non-negative comparison thresholds, optionally keyed by signal.", ('{"rootMeanSquaredError":0.1}',)),
+    "trafficDriverReference": ("Optional installed traffic-driver reference; use a reference returned by the active scenario tools, or null to leave it unchanged.", (None,)),
+    "trafficObjectCatalogPath": ("Optional installed Traffic Object Manager catalog path for the scenario participant, or null to omit the reference.", (None,)),
+    "trafficObjectSelectorKind": ("Optional traffic-object selector kind; use index or name when selecting a listed catalog object.", ("index",)),
+    "trafficObjectSelectorValue": ("Value paired with trafficObjectSelectorKind; use a decimal string for an index.", ("0",)),
+    "trafficObjectsJson": ("JSON array of traffic objects for basic-road creation, with road-relative s and d coordinates in meters.", ('[{"s":25.0,"d":-1.75}]',)),
+    "useCase": ("Use-case identifier to resolve, such as UC2 or UC3.", ("UC3",)),
+    "value": ("Scalar value expressed as invariant-culture text for the active parameter.", ("1200.0",)),
+    "valueJson": ("JSON value whose shape is selected by valueKind; this example is a scalar number.", ("1200.0",)),
+    "valueKind": ("Typed parameter shape: Scalar, Text, Vector, Matrix, or Table.", ("Scalar",)),
+    "workflowName": ("Exact workflow recipe name returned by workflow discovery.", ("create_basic_traffic_scenario",)),
+}
+
+
+def _documented_tool_registrar(mcp: Any) -> Any:
+    """Apply SDK-supported field/output annotations before registering each handler."""
+
+    class DocumentedToolRegistrar:
+        def tool(self, name: str) -> Any:
+            sdk_decorator = mcp.tool(name=name)
+
+            def decorate(function: Any) -> Any:
+                annotations = get_type_hints(function, include_extras=True)
+                for parameter_name in tuple(key for key in annotations if key != "return"):
+                    if parameter_name not in _INPUT_FIELD_METADATA:
+                        raise ValueError(f"Missing input schema metadata for {name}.{parameter_name}.")
+                    description, examples = _INPUT_FIELD_METADATA[parameter_name]
+                    field_metadata: dict[str, Any] = {"description": description}
+                    if examples is not None:
+                        field_metadata["examples"] = list(examples)
+                    annotations[parameter_name] = Annotated[
+                        annotations[parameter_name],
+                        Field(**field_metadata),
+                    ]
+                annotations["return"] = ToolResultEnvelope
+                function.__annotations__ = annotations
+                return sdk_decorator(function)
+
+            return decorate
+
+    return DocumentedToolRegistrar()
+
+
 def _tool_domain_for_name(tool_name: str) -> str:
     """Assign each registered name to exactly one documented domain."""
 
@@ -140,12 +285,13 @@ TOOL_DOMAIN_BY_NAME = {name: _tool_domain_for_name(name) for name in EXPECTED_TO
 
 
 def register_tools(mcp: Any, service: ModelDeskService) -> None:
-    """Register every expected tool exactly once on the provided FastMCP server."""
+    """Register the public tools with documented input and stable result schemas."""
 
     if mcp is None:
         raise ValueError("mcp must not be None")
     if service is None:
         raise ValueError("service must not be None")
+    mcp = _documented_tool_registrar(mcp)
 
     @mcp.tool(name="modeldesk_get_status")
     def modeldesk_get_status() -> dict[str, Any]:
@@ -443,7 +589,7 @@ def register_tools(mcp: Any, service: ModelDeskService) -> None:
 
     @mcp.tool(name="modeldesk_set_maneuver_behavior_profiles")
     def modeldesk_set_maneuver_behavior_profiles(fellowSelectorKind: str | None = None, fellowSelectorValue: str | None = None, maneuverSelectorKind: str = "index", maneuverSelectorValue: str = "0", longitudinalProfileJson: str = "{}", lateralProfileJson: str = "{}", save: bool = False, download: bool = False) -> dict[str, Any]:
-        """Set longitudinal/lateral behavior profile JSON on selected maneuver."""
+        """Apply and read back maneuver values. Only the ego (active) supports StartPosition (Start position on route, m) and InitialLongitudinalVelocity (km/h). Fellows do not have these initial properties; their JSON must explicitly select {"Position":{"YawAngleConstant":{"Constant":70.0}}} or {"Velocity":{"Constant":{"Constant":20.0}}} on the first segment. These are mutually exclusive behavior profiles, not ego initial fields. Fellow creation requires no yaw or profile values. Verify longitudinalPosition or longitudinalVelocity before persistence."""
 
         return _to_dict(service.set_maneuver_behavior_profiles(fellowSelectorKind, fellowSelectorValue, maneuverSelectorKind, maneuverSelectorValue, longitudinalProfileJson, lateralProfileJson, save, download))
 

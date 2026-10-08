@@ -1,8 +1,26 @@
 """Tests for project-pool file creation validation."""
 
+from types import SimpleNamespace
+
 import pytest
 
+from modeldesk_mcp.com_bridge.gateway import ModelDeskAutomationGateway
+from modeldesk_mcp.config import ComGatewayOptions
 from modeldesk_mcp.contracts import ProjectPoolFileCreationRequest, ProjectPoolFileType
+
+
+class _InlineDispatcher:
+    def invoke(self, operation, timeout_seconds):
+        return operation()
+
+
+class _RecordingPool:
+    def __init__(self) -> None:
+        self.calls: list[tuple[int, str, bool]] = []
+
+    def CreateFile(self, file_type: int, name: str, overwrite_existing: bool) -> bool:
+        self.calls.append((file_type, name, overwrite_existing))
+        return True
 
 
 def test_project_pool_request_maps_road_alias_and_strips_extension() -> None:
@@ -23,6 +41,12 @@ def test_project_pool_request_accepts_numeric_scenario_type() -> None:
     assert request.overwrite_existing is True
 
 
+def test_project_pool_type_three_matches_automation_layout_configuration() -> None:
+    request = ProjectPoolFileCreationRequest.create("3", "Layout.xml", False)
+
+    assert request.file_type.display_name == "LayoutConfiguration"
+
+
 def test_project_pool_request_rejects_directory_names() -> None:
     with pytest.raises(ValueError):
         ProjectPoolFileCreationRequest.create("RoadNetwork", "Roads/City.rd", False)
@@ -31,3 +55,60 @@ def test_project_pool_request_rejects_directory_names() -> None:
 def test_project_pool_request_rejects_invalid_type() -> None:
     with pytest.raises(ValueError):
         ProjectPoolFileCreationRequest.create("Unknown", "City", False)
+
+
+def test_create_road_network_without_active_project_returns_structured_failure() -> None:
+    gateway = object.__new__(ModelDeskAutomationGateway)
+    gateway._dispatcher = _InlineDispatcher()  # type: ignore[attr-defined]
+    gateway._options = ComGatewayOptions()  # type: ignore[attr-defined]
+    gateway._session_id = "test-session"  # type: ignore[attr-defined]
+    gateway._application = SimpleNamespace(ActiveProject=None)  # type: ignore[attr-defined]
+
+    result = gateway.create_road_network("SafeProbe", overwrite_existing=False)
+
+    assert not result.ok
+    assert result.error is not None
+    assert result.error.error_type == "invalid_state"
+
+
+def test_gateway_reacquires_active_project_on_each_operation() -> None:
+    class MutableApplication:
+        Version = "fake"
+
+        def __init__(self) -> None:
+            self.active_project = SimpleNamespace(Name="First project", ActiveExperiment=None)
+
+        @property
+        def ActiveProject(self):
+            return self.active_project
+
+    application = MutableApplication()
+    gateway = object.__new__(ModelDeskAutomationGateway)
+    gateway._dispatcher = _InlineDispatcher()  # type: ignore[attr-defined]
+    gateway._options = ComGatewayOptions()  # type: ignore[attr-defined]
+    gateway._session_id = "test-session"  # type: ignore[attr-defined]
+    gateway._application = application  # type: ignore[attr-defined]
+
+    first = gateway.get_status()
+    application.active_project = SimpleNamespace(Name="Second project", ActiveExperiment=None)
+    second = gateway.get_status()
+
+    assert first.to_dict()["data"]["activeProjectName"] == "First project"
+    assert second.to_dict()["data"]["activeProjectName"] == "Second project"
+
+
+def test_specialized_pool_creation_uses_source_defined_road_and_scenario_ids() -> None:
+    pool = _RecordingPool()
+    application = SimpleNamespace(ActiveProject=SimpleNamespace(Pool=pool))
+    gateway = object.__new__(ModelDeskAutomationGateway)
+    gateway._dispatcher = _InlineDispatcher()  # type: ignore[attr-defined]
+    gateway._options = ComGatewayOptions()  # type: ignore[attr-defined]
+    gateway._session_id = "test-session"  # type: ignore[attr-defined]
+    gateway._application = application  # type: ignore[attr-defined]
+
+    road_result = gateway.create_road_network("OvertakeRoad", overwrite_existing=False)
+    scenario_result = gateway.create_traffic_scenario("CutIn", overwrite_existing=True)
+
+    assert road_result.ok
+    assert scenario_result.ok
+    assert pool.calls == [(0, "OvertakeRoad", False), (1, "CutIn", True)]

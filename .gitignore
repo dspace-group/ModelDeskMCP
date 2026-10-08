@@ -29,12 +29,6 @@ pip-wheel-metadata/
 htmlcov/
 
 # Local/private working state
-/assignments/
-/observatory/
-/qa/
-state.json
-run.md
-orchestrator.jsonl
 *.jsonl
 *.sqlite
 *.db
@@ -63,4 +57,3 @@ Desktop.ini
 *.tmp
 *.bak
 .tmp-*/
-uv.lock

@@ -50,6 +50,12 @@ As a Customer/User of ModelDesk, I want to define scenario participants, maneuve
 
 For the MCP server scope, this use case must go beyond activating an existing scenario. It should include selecting or creating the active traffic scenario, managing fellows or other traffic participants, assigning traffic-object and driver references, defining maneuvers, building maneuver sequences, and setting longitudinal and lateral behavior profiles. If a new Traffic Scenario file is requested, automation must create it through `Application.ActiveProject.Pool.CreateFile(1, name, overwriteExisting)` before activation and authoring. Scenario tools should keep object references explicit, because scenarios depend on roads, traffic objects, drivers, and experiment context.
 
+The initial properties **Initial longitudinal velocity** and **Start position on route** belong only to the ego vehicle/maneuver sequence, not to fellows. Select the ego with `fellowSelectorKind="active"` and pass `{"StartPosition":70.0,"InitialLongitudinalVelocity":20.0}` to `modeldesk_set_maneuver_behavior_profiles`; route start position is meters and initial longitudinal velocity is km/h, passed unchanged.
+
+Fellows can be created without yaw or behavior-profile values. To edit their longitudinal behavior, discover their sequences with `modeldesk_list_fellow_activities` and provide an explicit profile such as `{"Position":{"YawAngleConstant":{"Constant":70.0}}}` or `{"Velocity":{"Constant":{"Constant":20.0}}}`. These target the first segment's behavior profile, not ego initial fields. The tool reads back the value as `data.details.longitudinalPosition` or `data.details.longitudinalVelocity` before Save or Download. A fellow segment has only one active longitudinal profile; selecting Position or Velocity replaces the active longitudinal mode. Neither ego-only initial property is accepted for a fellow.
+
+The verified Traffic Editor automation interface exposes maneuver collection access and an immutable `Maneuver.Index`, but no reorder member. `modeldesk_set_scenario_maneuver_sequence` therefore accepts only a requested order that already matches the current order; a changed order returns a structured unsupported error before Save or Download. Sequence reordering remains unavailable until a source-backed API is verified.
+
 Typical outcomes:
 
 - maneuver-based tests

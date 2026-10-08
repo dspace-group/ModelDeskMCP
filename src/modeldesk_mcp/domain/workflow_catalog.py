@@ -100,6 +100,9 @@ def _create_scenario_plan() -> WorkflowPlan:
         "Read fellows, maneuver collections, and scenario summary.",
         "Add, update, and remove fellows, including traffic-object and traffic-driver references.",
         "Add, update, and remove maneuvers on the scenario or selected fellows.",
+        "Add a fellow, then add its sequence; creation alone does not position it.",
+        "Set fellow position with explicit Position -> YawAngleConstant -> Constant JSON and verify longitudinalPosition before saving or downloading.",
+        "Set ego sequence StartPosition in meters along the route and InitialLongitudinalVelocity in km/h; verify both returned values.",
         "Set maneuver sequence order and longitudinal/lateral behavior profiles.",
         "Use maneuver control to start, stop, or reset executable scenario behavior.",
         "Save and download the active experiment.",
@@ -126,7 +129,7 @@ def _create_scenario_plan() -> WorkflowPlan:
         "modeldesk_save_active_experiment",
         "modeldesk_download_active_experiment",
     )
-    return WorkflowPlan("create_basic_traffic_scenario", "UC3", True, steps, tools, "Covers scenario creation/activation, fellow and maneuver authoring, behavior sequencing/profiles, and executable maneuver control.")
+    return WorkflowPlan("create_basic_traffic_scenario", "UC3", True, steps, tools, "Covers scenario creation/activation, fellow and maneuver authoring, behavior sequencing/profiles, and executable maneuver control. Fellow creation alone does not set position; verify explicit Position -> YawAngleConstant readback before persistence.")
 
 
 def _create_processing_plan() -> WorkflowPlan:

@@ -1,4 +1,8 @@
-"""Read and compare ModelDesk MATLAB captures within an active project."""
+"""Read and compare ModelDesk MATLAB captures within an active project.
+
+Comparisons use finite samples and must reject arithmetic whose returned metrics
+cannot be represented as finite doubles; this module never edits capture files.
+"""
 
 from __future__ import annotations
 
@@ -23,7 +27,12 @@ def compare_capture_files(
     signal_specs_json: str,
     tolerances_json: str,
 ) -> dict[str, Any]:
-    """Compare two captures resolved below the active project's measurements directory."""
+    """Compare two project-local captures and return finite metrics or ``ValueError``.
+
+Both names must resolve to bounded MAT files beneath the measurements directory;
+signal and tolerance JSON is validated before a result is returned. This function
+performs read-only filesystem access and never writes captures or project state.
+"""
 
     measurements_directory = Path(working_root).resolve() / MEASUREMENTS_RELATIVE_PATH
     reference = _load_capture(_resolve_capture_path(measurements_directory, reference_capture))
@@ -224,13 +233,18 @@ def _compare_signal(
     if not np.any(finite_mask):
         raise ValueError(f"Signals '{reference_name}' and '{candidate_name}' have no finite overlapping samples.")
     compared_times = aligned_times[finite_mask]
-    differences = aligned_candidate[finite_mask] - aligned_reference[finite_mask]
-    metrics = {
-        "meanDifference": float(np.mean(differences)),
-        "meanAbsoluteError": float(np.mean(np.abs(differences))),
-        "rootMeanSquaredError": float(np.sqrt(np.mean(np.square(differences)))),
-        "maximumAbsoluteError": float(np.max(np.abs(differences))),
-    }
+    with np.errstate(over="ignore", invalid="ignore"):
+        differences = aligned_candidate[finite_mask] - aligned_reference[finite_mask]
+        if not np.all(np.isfinite(differences)):
+            raise ValueError("Signal differences cannot be represented as finite values.")
+        metrics = {
+            "meanDifference": float(np.mean(differences)),
+            "meanAbsoluteError": float(np.mean(np.abs(differences))),
+            "rootMeanSquaredError": float(np.sqrt(np.mean(np.square(differences)))),
+            "maximumAbsoluteError": float(np.max(np.abs(differences))),
+        }
+    if not all(math.isfinite(value) for value in metrics.values()):
+        raise ValueError("Signal comparison metrics cannot be represented as finite values.")
     applied_tolerances = {key: tolerances[key] for key in TOLERANCE_KEYS if key in tolerances}
     applied_tolerances.update(tolerances["signals"].get(reference_name, {}))
     has_sufficient_overlap = compared_times.size >= 2

@@ -27,7 +27,11 @@ def create_app() -> "MCPServer":
 
 
 def main(argv: list[str] | None = None) -> int | None:
-    """Run the stdio server or a COM-free metadata command."""
+    """Run COM-free metadata commands or start the MCP stdio server.
+
+    Metadata commands return before app creation, so they do not construct the
+    COM runtime. During server operation, stdout belongs to MCP framing.
+    """
 
     parser = argparse.ArgumentParser(description="ModelDesk MCP stdio server.")
     metadata_group = parser.add_mutually_exclusive_group()

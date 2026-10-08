@@ -28,8 +28,14 @@ class ToolError:
     is_retryable: bool = False
 
 
+_QUOTED_ABSOLUTE_PATH_PATTERN = re.compile(
+    r"""(?i)(?P<quote>['"])(?:[a-z]:[\\/]|\\\\|/(?!/))(?:(?!(?P=quote))[^\r\n])*(?P=quote)"""
+)
+_SPACED_FILE_PATH_PATTERN = re.compile(
+    r"(?i)(?<![a-z0-9_])(?:[a-z]:[\\/]|\\\\|/(?!/))[^<>:\"'|?*\r\n,;)}\]]*?\.[a-z0-9][a-z0-9._-]*(?=$|[\s,;)}\]])"
+)
 _ABSOLUTE_PATH_PATTERN = re.compile(
-    r"(?i)(?<![a-z0-9_])(?:[a-z]:[\\/]|\\\\|/(?!/))[^<>:\"'|?*\r\n\s,;)\]}]+"
+    r"(?i)(?<![a-z0-9_])(?:[a-z]:[\\/]|\\\\|/(?!/))[^<>:\"'|?*\r\n\s,;)}\]]+"
 )
 
 
@@ -44,6 +50,8 @@ def public_error_message(message: object) -> str:
     text = str(message).strip()
     if text == "":
         return "The operation failed without additional details."
+    text = _QUOTED_ABSOLUTE_PATH_PATTERN.sub("[local path]", text)
+    text = _SPACED_FILE_PATH_PATTERN.sub("[local path]", text)
     return _ABSOLUTE_PATH_PATTERN.sub("[local path]", text)
 
 

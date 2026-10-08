@@ -1,3 +1,6 @@
+# Trigger: all branch pushes and pull requests; this workflow emits validation results only.
+# Success means the Windows/Python 3.14 uv environment passes metadata, compile, test, and COM-free smoke checks.
+# Fail closed: every validation step must succeed, and the fixed tool-count assertions must remain exact.
 name: Python tests
 
 on:
@@ -10,6 +13,7 @@ permissions:
   contents: read
 
 jobs:
+  # One source-checkout quality gate; live ModelDesk COM is deliberately not a CI prerequisite.
   test:
     runs-on: windows-latest
     timeout-minutes: 20

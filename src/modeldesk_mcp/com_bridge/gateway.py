@@ -6,12 +6,15 @@ and TrafficObjectManager. Each operation enters COM through ``ComStaDispatcher``
 the gateway keeps only the root application reference and reacquires child
 objects from selectors inside the operation that uses them. Results leave this
 boundary as structured ``ToolResult`` values, including recoverable failures.
+Maneuver-profile writes validate both JSON sides before COM traversal, verify
+requested values by reading them back, and persist only after verification.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from pathlib import Path
+import math
 import platform
 import sys
 import uuid
@@ -53,6 +56,7 @@ from modeldesk_mcp.contracts import (
 )
 from modeldesk_mcp.contracts.requests import (
     EnvironmentPoolGroupRequest,
+    ManeuverBehaviorProfileRequest,
     MAX_LANE_COUNT_PER_SIDE,
     MAX_LANE_MAPPING_COUNT,
     MAX_LANE_WIDTH,
@@ -289,15 +293,7 @@ class ModelDeskAutomationGateway:
         def operation(application: Any) -> DomainSummary:
             models = _get_required_property(_get_active_experiment(application), "Models")
             active_model_info = _get_required_property(models, "ActiveModelInfo")
-            properties = com.read_properties(
-                active_model_info,
-                "ModelName",
-                "ModelFilePath",
-                "ModelType",
-                "PlatformName",
-                "Validity",
-                "MLWorkingDirectory",
-            )
+            properties = _read_model_info_properties(active_model_info)
             return self._create_object_summary("parameterization.activeModel", active_model_info, properties)
 
         return self._execute_com("modeldesk_get_active_model_info", operation)
@@ -322,15 +318,7 @@ class ModelDeskAutomationGateway:
                 normalized_initialization_command,
                 normalized_platform_name,
             )
-            details = com.read_properties(
-                model_info,
-                "ModelName",
-                "ModelFilePath",
-                "ModelType",
-                "PlatformName",
-                "Validity",
-                "MLWorkingDirectory",
-            )
+            details = _read_model_info_properties(model_info)
             return OperationInfo("modeldesk_set_active_model", True, "Active model set.", details)
 
         return self._execute_com("modeldesk_set_active_model", operation)
@@ -351,6 +339,8 @@ class ModelDeskAutomationGateway:
             parsed_value = float(value)
         except ValueError:
             return self._validation_failure("modeldesk_set_scalar_parameter", "Value must be a floating point number using invariant culture.")
+        if not math.isfinite(parsed_value):
+            return self._validation_failure("modeldesk_set_scalar_parameter", "Value must be a finite floating point number.")
 
         def operation(application: Any) -> ParameterValueInfo:
             parameter = self._find_parameter(application, parameter_path)
@@ -619,53 +609,192 @@ class ModelDeskAutomationGateway:
         return self._execute_com("modeldesk_remove_scenario_maneuver", operation)
 
     def set_scenario_maneuver_sequence(self, fellow_selector: Selector, maneuver_selectors_json: str, save: bool, download: bool) -> ToolResult:
-        """Set maneuver sequence order."""
+        """Confirm an existing order or report that reordering is unsupported.
+
+        The verified automation interface exposes an immutable maneuver Index
+        and no reorder member. This method never writes ordering properties:
+        changed order fails before persistence, while a matching order is a no-op.
+        """
 
         def operation(application: Any) -> OperationInfo:
             maneuver_selectors = parse_selector_array_json(maneuver_selectors_json, "maneuverSelectorsJson")
             if len(maneuver_selectors) == 0:
                 raise ValueError("At least one maneuver selector is required.")
             maneuvers = _get_scenario_maneuvers_collection(application, fellow_selector)
-            assigned_count = 0
             for sequence_index, selector in enumerate(maneuver_selectors):
-                maneuver = com.resolve_item(maneuvers, selector)
-                assigned = _try_set_first_available_int_property(maneuver, sequence_index, "SequenceIndex", "Order", "Index")
-                if not assigned:
-                    raise RuntimeError("Could not assign maneuver sequence because no sequence property was found.")
-                assigned_count += 1
+                current_maneuver = _invoke_required_item(maneuvers, sequence_index, "maneuver")
+                requested_maneuver = com.resolve_item(maneuvers, selector)
+                current_index = _read_int_property(current_maneuver, "Index")
+                requested_index = _read_int_property(requested_maneuver, "Index")
+                if requested_index != current_index:
+                    raise RuntimeError(
+                        "Reordering is unsupported: the verified automation interface exposes only immutable "
+                        "Maneuver.Index and no reorder member."
+                    )
             details = {
                 "fellowSelectorKind": fellow_selector.by.value,
                 "fellowSelectorValue": fellow_selector.value,
-                "assignedCount": str(assigned_count),
+                "assignedCount": "0",
             }
             _apply_scenario_save_download(application, save, download, details)
-            return OperationInfo("modeldesk_set_scenario_maneuver_sequence", True, "Scenario maneuver sequence assigned.", details)
+            return OperationInfo(
+                "modeldesk_set_scenario_maneuver_sequence",
+                True,
+                "Requested maneuver order already matches the current order; no reorder was applied.",
+                details,
+            )
 
         return self._execute_com("modeldesk_set_scenario_maneuver_sequence", operation)
 
     def set_maneuver_behavior_profiles(self, fellow_selector: Selector, maneuver_selector: Selector, longitudinal_profile_json: str | None, lateral_profile_json: str | None, save: bool, download: bool) -> ToolResult:
-        """Set longitudinal and lateral behavior profile properties."""
+        """Apply and verify ego sequence or fellow profile values before persistence.
 
-        if maneuver_selector.by == SelectorKind.ACTIVE:
-            return self._validation_failure("modeldesk_set_maneuver_behavior_profiles", "Maneuver selector must not use active.")
+        The active fellow selector targets the ego sequence's direct StartPosition and
+        InitialLongitudinalVelocity members; values are passed through unchanged (meters
+        along the route and km/h). A fellow selector targets only Segments.Item(0).Activity
+        and selects either Position -> YawAngleConstant or Velocity -> Constant; a segment
+        has only one active longitudinal profile. Both JSON sides are
+        validated before COM traversal; failures after profile activation or assignment may
+        leave partial in-memory changes, which this operation does not roll back. Save and
+        Download run only after every requested value has been read back successfully.
+        """
+
+        try:
+            fellow_selector.validate()
+            maneuver_selector.validate()
+            if maneuver_selector.by == SelectorKind.ACTIVE:
+                raise ValueError("Maneuver selector must not use active.")
+            request = ManeuverBehaviorProfileRequest.create(
+                fellow_selector,
+                longitudinal_profile_json,
+                lateral_profile_json,
+            )
+        except ValueError as exception:
+            return self._validation_failure(
+                "modeldesk_set_maneuver_behavior_profiles",
+                public_error_message(exception),
+            )
 
         def operation(application: Any) -> OperationInfo:
-            maneuvers = _get_scenario_maneuvers_collection(application, fellow_selector)
-            maneuver = com.resolve_item(maneuvers, maneuver_selector)
-            updated_count = 0
-            updated_count += _apply_profile_properties(maneuver, longitudinal_profile_json, "longitudinalProfileJson", "LongitudinalBehavior", "LongitudinalProfile", "Longitudinal")
-            updated_count += _apply_profile_properties(maneuver, lateral_profile_json, "lateralProfileJson", "LateralBehavior", "LateralProfile", "Lateral")
-            if updated_count == 0:
-                raise ValueError("At least one longitudinal or lateral profile property must be provided.")
-            details = {
-                "fellowSelectorKind": fellow_selector.by.value,
-                "fellowSelectorValue": fellow_selector.value,
-                "maneuverSelectorKind": maneuver_selector.by.value,
-                "maneuverSelectorValue": maneuver_selector.value,
-                "updatedPropertyCount": str(updated_count),
-            }
-            _apply_scenario_save_download(application, save, download, details)
-            return OperationInfo("modeldesk_set_maneuver_behavior_profiles", True, "Maneuver behavior profiles updated.", details)
+            mutation_started = False
+            save_completed = False
+            phase = "resolving the selected maneuver sequence"
+
+            def mark_mutation() -> None:
+                nonlocal mutation_started
+                mutation_started = True
+
+            try:
+                maneuvers = _get_scenario_maneuvers_collection(application, fellow_selector)
+                sequence = com.resolve_item(maneuvers, maneuver_selector)
+                updated_count = 0
+                details: dict[str, str | None] = {
+                    "fellowSelectorKind": fellow_selector.by.value,
+                    "fellowSelectorValue": fellow_selector.value,
+                    "maneuverSelectorKind": maneuver_selector.by.value,
+                    "maneuverSelectorValue": maneuver_selector.value,
+                }
+
+                if request.longitudinal_properties:
+                    if fellow_selector.by == SelectorKind.ACTIVE:
+                        ego_sequence = _resolve_ego_maneuver_sequence(sequence)
+                        detail_names = {
+                            "StartPosition": "startPosition",
+                            "InitialLongitudinalVelocity": "initialLongitudinalVelocity",
+                        }
+                        for property_name, requested_value in request.longitudinal_properties.items():
+                            phase = f"setting ego sequence {property_name}"
+                            mark_mutation()
+                            actual_value = _set_and_verify_profile_property(
+                                ego_sequence,
+                                property_name,
+                                requested_value,
+                                "ego sequence",
+                            )
+                            details[detail_names[property_name]] = str(actual_value)
+                            updated_count += 1
+                    else:
+                        phase = "reading the selected fellow sequence segments"
+                        segments = _get_required_property(sequence, "Segments")
+                        if com.get_count(segments) <= 0:
+                            raise RuntimeError("The selected fellow sequence has no segments; no segment was created.")
+                        segment = com.invoke_item(segments, 0)
+                        if segment is None:
+                            raise RuntimeError("The selected fellow sequence's first segment could not be read.")
+                        activity = _get_required_property(segment, "Activity")
+                        longitudinal_type = _get_required_property(activity, "LongitudinalType")
+                        profile_name, source_properties = next(iter(request.longitudinal_properties.items()))
+                        source_name, constant_properties = next(iter(source_properties.items()))
+
+                        phase = f"activating the fellow {profile_name} profile"
+                        longitudinal_profile = _activate_available_profile_element(
+                            longitudinal_type,
+                            profile_name,
+                            "longitudinal profile",
+                            mark_mutation,
+                        )
+                        source_type = _get_required_property(longitudinal_profile, "SourceType")
+                        phase = f"activating the fellow {source_name} source"
+                        longitudinal_source = _activate_available_profile_element(
+                            source_type,
+                            source_name,
+                            f"{profile_name} source",
+                            mark_mutation,
+                        )
+                        requested_value = constant_properties["Constant"]
+                        phase = f"setting and reading back fellow {profile_name}.Constant"
+                        actual_value = _set_and_verify_profile_property(
+                            longitudinal_source,
+                            "Constant",
+                            requested_value,
+                            f"fellow {profile_name}.{source_name}",
+                        )
+                        detail_name = "longitudinalPosition" if profile_name == "Position" else "longitudinalVelocity"
+                        details[detail_name] = str(actual_value)
+                        updated_count += 1
+
+                if request.lateral_properties:
+                    phase = "resolving the existing lateral profile target"
+                    lateral_target = _get_first_available_property(
+                        sequence,
+                        "LateralBehavior",
+                        "LateralProfile",
+                        "Lateral",
+                    )
+                    phase = "applying and reading back lateral profile properties"
+                    updated_count += _apply_verified_scalar_properties(
+                        lateral_target,
+                        request.lateral_properties,
+                        "lateralProfileJson",
+                        mark_mutation,
+                    )
+
+                details["updatedPropertyCount"] = str(updated_count)
+                active_experiment = None
+                if save or download:
+                    phase = "resolving the active experiment for persistence"
+                    active_experiment = _get_active_experiment(application)
+                if save:
+                    phase = "Save"
+                    _invoke_boolean_aware_method(active_experiment, "Save")
+                    save_completed = True
+                if download:
+                    phase = "Download"
+                    _invoke_boolean_aware_method(active_experiment, "Download")
+                details["saved"] = str(save)
+                details["downloaded"] = str(download)
+                return OperationInfo("modeldesk_set_maneuver_behavior_profiles", True, "Maneuver behavior profiles updated and verified.", details)
+            except Exception as exception:
+                if mutation_started:
+                    if phase == "Download":
+                        save_status = "Save succeeded and remains complete" if save_completed else "no Save was requested"
+                        message = f"Download failed after profile verification; {save_status}. No rollback was attempted: {exception}"
+                    elif phase == "Save":
+                        message = f"Save failed after profile verification; in-memory COM changes may be partial and were not rolled back: {exception}"
+                    else:
+                        message = f"{phase} failed; in-memory COM changes may be partial and were not rolled back: {exception}"
+                    raise RuntimeError(message) from exception
+                raise
 
         return self._execute_com("modeldesk_set_maneuver_behavior_profiles", operation)
 
@@ -995,8 +1124,9 @@ class ModelDeskAutomationGateway:
             "trafficObjectCatalogMutation": False,
             "processing": _can_resolve_domain(application, ModelDeskDomain.PROCESSING),
             "processingConfiguration": _can_resolve_domain(application, ModelDeskDomain.PROCESSING),
-            "testing": _can_resolve_domain(application, ModelDeskDomain.TESTING),
-            "testCaseInspection": _can_resolve_domain(application, ModelDeskDomain.TESTING),
+            # Testing flags describe API support, so never resolve the lazy ActiveExperiment.Test getter here.
+            "testing": True,
+            "testCaseInspection": True,
             "plotting": _can_resolve_domain(application, ModelDeskDomain.PLOTTING),
             "plotArtifactInspection": _can_resolve_domain(application, ModelDeskDomain.PLOTTING),
             "comparison": True,
@@ -1458,6 +1588,33 @@ def _get_active_experiment(application: Any) -> Any:
     return active_experiment
 
 
+def _read_model_info_properties(model_info: Any) -> dict[str, str | None]:
+    """Map verified COM model-info names to stable public response keys.
+
+    The automation interface exposes ``Path`` and ``MATLABWorkingDirectory``;
+    callers continue to receive ``ModelFilePath`` and ``MLWorkingDirectory``.
+    COM read failures propagate to the gateway's structured error boundary.
+    """
+
+    source_properties = com.read_properties(
+        model_info,
+        "ModelName",
+        "Path",
+        "ModelType",
+        "PlatformName",
+        "Validity",
+        "MATLABWorkingDirectory",
+    )
+    return {
+        "ModelName": source_properties.get("ModelName"),
+        "ModelFilePath": source_properties.get("Path"),
+        "ModelType": source_properties.get("ModelType"),
+        "PlatformName": source_properties.get("PlatformName"),
+        "Validity": source_properties.get("Validity"),
+        "MLWorkingDirectory": source_properties.get("MATLABWorkingDirectory"),
+    }
+
+
 def _get_required_property(instance: Any, property_name: str) -> Any:
     value = com.get_property(instance, property_name)
     if value is None:
@@ -1694,12 +1851,16 @@ def _apply_road_object_base_properties(road_object: Any, name: str | None, catal
 
 
 def _apply_road_object_properties(road_object: Any, properties: RoadObjectProperties, road_length: float) -> None:
-    _apply_road_object_base_properties(road_object, properties.name, properties.catalog_path, properties.lane_mapping or ())
+    position = None
     if properties.s is not None or properties.d is not None:
         position = _get_required_property(road_object, "Position")
         s = properties.s if properties.s is not None else _read_double_property(position, "S")
         d = properties.d if properties.d is not None else _read_double_property(position, "D")
         _validate_road_object_position(s, d, road_length)
+
+    # Validate the complete road-relative position before writing any other field.
+    _apply_road_object_base_properties(road_object, properties.name, properties.catalog_path, properties.lane_mapping or ())
+    if position is not None:
         if properties.s is not None:
             com.set_property(position, "S", properties.s)
         if properties.d is not None:
@@ -1786,6 +1947,28 @@ def _get_scenario_maneuvers_collection(application: Any, fellow_selector: Select
     # A fellow's maneuver-like data lives under Sequences, not under the ego's
     # Maneuvers/Maneuver/ManeuverSequence property names (FellowAutomation has none of those).
     return _get_first_available_property(fellow, "Sequences")
+
+
+def _resolve_ego_maneuver_sequence(maneuver: Any) -> Any:
+    """Resolve the only unambiguous sequence beneath a selected ego maneuver.
+
+    The public selector identifies ``TrafficScenario.Maneuver[index]`` but has
+    no sequence index. Empty or multiple source sequences therefore fail before
+    mutation instead of silently targeting an unrelated sequence.
+    """
+
+    sequences = _get_required_property(maneuver, "Sequences")
+    sequence_count = com.get_count(sequences)
+    if sequence_count == 0:
+        raise RuntimeError("The selected ego maneuver has no sequences.")
+    if sequence_count > 1:
+        raise RuntimeError(
+            "The selected ego maneuver has multiple sequences; this operation has no sequence selector."
+        )
+    sequence = com.invoke_item(sequences, 0)
+    if sequence is None:
+        raise RuntimeError("The selected ego maneuver's sequence could not be read.")
+    return sequence
 
 
 def _get_vehicle_object_type_manager(application: Any, fellow_selector: Selector, maneuver_index: int) -> tuple[Any, str]:
@@ -1884,22 +2067,76 @@ def _try_set_first_available_string_property(owner: Any, value: str, *property_c
     return False
 
 
-def _try_set_first_available_int_property(owner: Any, value: int, *property_candidates: str) -> bool:
-    for property_name in property_candidates:
-        has_value, _ = com.try_get_property(owner, property_name)
-        if not has_value:
-            continue
-        com.set_property(owner, property_name, value)
-        return True
-    return False
+def _activate_available_profile_element(
+    selection_manager: Any,
+    element_name: str,
+    selection_label: str,
+    mark_mutation: Callable[[], None],
+) -> Any:
+    available_elements = com.get_property(selection_manager, "AvailableElements")
+    if isinstance(available_elements, str):
+        normalized_available_elements = (available_elements,)
+    else:
+        try:
+            normalized_available_elements = tuple(available_elements)
+        except TypeError as exception:
+            raise RuntimeError(f"Could not read available {selection_label} elements.") from exception
+    if element_name not in normalized_available_elements:
+        raise RuntimeError(f"{selection_label} '{element_name}' is unavailable.")
+    mark_mutation()
+    com.invoke_method(selection_manager, "Activate", element_name)
+    return _get_required_property(selection_manager, "ActiveElement")
 
 
-def _apply_profile_properties(maneuver: Any, profile_json: str | None, parameter_name: str, *profile_property_candidates: str) -> int:
-    normalized_json = _normalize_optional_text(profile_json)
-    if normalized_json is None:
-        return 0
-    profile_target = _get_first_available_property(maneuver, *profile_property_candidates)
-    return _apply_scalar_properties_from_json(profile_target, normalized_json, parameter_name)
+def _set_and_verify_profile_property(target: Any, property_name: str, requested_value: Any, target_label: str) -> Any:
+    try:
+        com.set_property(target, property_name, requested_value)
+        actual_value = com.get_property(target, property_name)
+    except Exception as exception:
+        raise RuntimeError(f"{target_label}.{property_name} could not be assigned and read back: {exception}") from exception
+
+    if isinstance(requested_value, int | float) and not isinstance(requested_value, bool):
+        try:
+            actual_is_finite_number = (
+                isinstance(actual_value, int | float)
+                and not isinstance(actual_value, bool)
+                and math.isfinite(actual_value)
+            )
+        except OverflowError:
+            actual_is_finite_number = False
+        values_match = actual_is_finite_number and actual_value == requested_value
+    else:
+        values_match = type(actual_value) is type(requested_value) and actual_value == requested_value
+    if not values_match:
+        raise RuntimeError(f"{target_label}.{property_name} read-back did not match the requested value.")
+    return actual_value
+
+
+def _apply_verified_scalar_properties(
+    target: Any,
+    properties: dict[str, Any],
+    parameter_name: str,
+    mark_mutation: Callable[[], None],
+    depth: int = 0,
+) -> int:
+    if depth > 4:
+        raise ValueError("Nested profile depth greater than 4 is not supported.")
+    updated_count = 0
+    for property_name, value in properties.items():
+        if isinstance(value, dict):
+            nested_target = _get_required_property(target, property_name)
+            updated_count += _apply_verified_scalar_properties(
+                nested_target,
+                value,
+                parameter_name,
+                mark_mutation,
+                depth + 1,
+            )
+        else:
+            mark_mutation()
+            _set_and_verify_profile_property(target, property_name, value, parameter_name)
+            updated_count += 1
+    return updated_count
 
 
 def _apply_scalar_properties_from_json(target: Any, properties_json: str | None, parameter_name: str) -> int:

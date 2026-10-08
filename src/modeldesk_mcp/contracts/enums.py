@@ -43,7 +43,7 @@ class ProjectPoolFileType(IntEnum):
             ProjectPoolFileType.ROAD_NETWORK: "RoadNetwork",
             ProjectPoolFileType.TRAFFIC_SCENARIO: "TrafficScenario",
             ProjectPoolFileType.TESTING_TEST: "TestingTest",
-            ProjectPoolFileType.SIMULATION_CONFIGURATION: "SimulationConfiguration",
+            ProjectPoolFileType.SIMULATION_CONFIGURATION: "LayoutConfiguration",
             ProjectPoolFileType.TRAFFIC_DRIVER: "TrafficDriver",
         }[self]
 

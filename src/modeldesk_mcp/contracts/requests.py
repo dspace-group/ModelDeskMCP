@@ -188,6 +188,48 @@ class ParameterValueEditRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class ManeuverBehaviorProfileRequest:
+    """Validated ego/fellow profile payloads, ready before the gateway touches COM."""
+
+    longitudinal_properties: dict[str, Any]
+    lateral_properties: dict[str, Any]
+
+    @staticmethod
+    def create(
+        fellow_selector: Selector,
+        longitudinal_profile_json: str | None,
+        lateral_profile_json: str | None,
+    ) -> "ManeuverBehaviorProfileRequest":
+        """Parse both profile sides and enforce the existing selector-specific payload contract.
+
+        Active (ego) longitudinal values are direct sequence-owned finite numbers. Fellow
+        values must explicitly select Position.YawAngleConstant or Velocity.Constant
+        behavior profiles; these are not aliases for the ego-only initial properties.
+        A fellow segment supports only one longitudinal profile. Lateral scalar assignments
+        retain their shape. This method has no COM side effects and raises ValueError for
+        malformed, ambiguous, or empty requests.
+        """
+
+        if fellow_selector is None:
+            raise ValueError("A fellow selector is required.")
+        fellow_selector.validate()
+        longitudinal = _parse_maneuver_behavior_profile_json(longitudinal_profile_json, "longitudinalProfileJson")
+        lateral = _parse_maneuver_behavior_profile_json(lateral_profile_json, "lateralProfileJson")
+        _validate_finite_json_numbers(longitudinal, "longitudinalProfileJson")
+        _validate_finite_json_numbers(lateral, "lateralProfileJson")
+
+        if fellow_selector.by == SelectorKind.ACTIVE:
+            _validate_ego_maneuver_properties(longitudinal)
+        else:
+            longitudinal = _validate_fellow_longitudinal_properties(longitudinal)
+        _validate_scalar_property_object(lateral, "lateralProfileJson", 0)
+
+        if not longitudinal and not lateral:
+            raise ValueError("At least one longitudinal or lateral profile property must be provided.")
+        return ManeuverBehaviorProfileRequest(longitudinal, lateral)
+
+
+@dataclass(frozen=True, slots=True)
 class RoadVectorSpec:
     """Optional spline end-vector properties."""
 
@@ -377,11 +419,17 @@ def parse_selector_array_json(json_text: str | None, parameter_name: str) -> tup
 
 
 def parse_scalar_properties_json(properties_json: str | None, parameter_name: str) -> dict[str, Any]:
-    """Parse a bounded JSON object containing scalar COM property assignments."""
+    """Parse bounded finite-valued scalar properties before COM mutation.
+
+    Blank input means no assignments. Non-object, unsupported, over-deep, or
+    non-finite JSON values raise ``ValueError``; the scenario gateway relies on
+    this boundary to reject malformed profiles before traversing COM objects.
+    """
 
     if properties_json is None or properties_json.strip() == "":
         return {}
     data = _parse_json_object(properties_json, "Properties JSON must be an object")
+    _validate_finite_json_numbers(data, parameter_name)
     _validate_scalar_property_object(data, parameter_name, 0)
     return data
 
@@ -535,7 +583,10 @@ def _parse_scalar_value(value: Any) -> float | str | bool:
     if isinstance(value, bool):
         return value
     if isinstance(value, int | float):
-        numeric = float(value)
+        try:
+            numeric = float(value)
+        except OverflowError as exc:
+            raise ValueError("Scalar parameter number is outside the supported finite range.") from exc
         _validate_finite(numeric, "value")
         return numeric
     if isinstance(value, str):
@@ -597,6 +648,10 @@ def _parse_table_value(value: Any) -> tuple[tuple[float, ...], ...]:
         for index, column in enumerate(columns):
             if not isinstance(column, str) or column.strip() == "":
                 raise ValueError(f"Table column {index} must be a non-empty string.")
+        if isinstance(rows, list):
+            for row_index, row in enumerate(rows):
+                if isinstance(row, list) and len(row) != len(columns):
+                    raise ValueError(f"Table row {row_index} must match the declared column count.")
     return _parse_matrix_value(rows, MAX_TABLE_ROWS, MAX_TABLE_COLUMNS)
 
 
@@ -707,12 +762,13 @@ def _parse_basic_traffic_objects(traffic_objects_json: str | None) -> tuple[Basi
     for item in data:
         if not isinstance(item, dict):
             raise ValueError("Traffic object JSON must contain objects.")
+        object_index = len(objects)
         objects.append(
             BasicRoadTrafficObjectSpec(
                 name=_optional_text(_case_insensitive_get(item, "name")),
                 catalog_path=_optional_text(_case_insensitive_get(item, "catalogPath")),
-                s=float(_case_insensitive_get(item, "s", 0.0)),
-                d=float(_case_insensitive_get(item, "d", 0.0)),
+                s=_parse_finite_double(_case_insensitive_get(item, "s", 0.0), f"trafficObjects[{object_index}].s"),
+                d=_parse_finite_double(_case_insensitive_get(item, "d", 0.0), f"trafficObjects[{object_index}].d"),
                 lane_mapping=_optional_lane_mapping(_case_insensitive_get(item, "laneMapping")) or (),
             )
         )
@@ -727,12 +783,121 @@ def _validate_basic_traffic_object(traffic_object: BasicRoadTrafficObjectSpec, o
 
 def _parse_json_object(json_text: str, message: str) -> dict[str, Any]:
     try:
-        data = json.loads(json_text)
+        data = json.loads(json_text, parse_constant=_reject_non_finite_json_constant)
     except json.JSONDecodeError as exc:
         raise ValueError(f"{message}: {exc.msg}") from exc
+    except ValueError as exc:
+        raise ValueError(f"{message}: {exc}") from exc
     if not isinstance(data, dict):
         raise ValueError(message)
     return data
+
+
+def _parse_maneuver_behavior_profile_json(json_text: str | None, parameter_name: str) -> dict[str, Any]:
+    if json_text is None or json_text.strip() == "":
+        return {}
+    try:
+        data = json.loads(
+            json_text,
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_non_finite_json_constant,
+        )
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{parameter_name} must be valid JSON: {exc.msg}") from exc
+    except ValueError as exc:
+        raise ValueError(f"{parameter_name} is invalid: {exc}") from exc
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError(f"{parameter_name} must be a JSON object.")
+    return data
+
+
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    data: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in data:
+            raise ValueError(f"Duplicate JSON object key '{key}'.")
+        data[key] = value
+    return data
+
+
+def _reject_non_finite_json_constant(value: str) -> None:
+    raise ValueError(f"Non-finite JSON number '{value}' is not supported.")
+
+
+def _validate_finite_json_numbers(value: Any, parameter_name: str) -> None:
+    if isinstance(value, bool):
+        return
+    if isinstance(value, int | float):
+        try:
+            is_finite = math.isfinite(value)
+        except OverflowError as exc:
+            raise ValueError(f"{parameter_name} contains a number outside the supported finite range.") from exc
+        if not is_finite:
+            raise ValueError(f"{parameter_name} must not contain non-finite numbers.")
+        return
+    if isinstance(value, dict):
+        for nested_value in value.values():
+            _validate_finite_json_numbers(nested_value, parameter_name)
+    elif isinstance(value, list):
+        for nested_value in value:
+            _validate_finite_json_numbers(nested_value, parameter_name)
+
+
+def _validate_ego_maneuver_properties(properties: dict[str, Any]) -> None:
+    allowed_properties = {"StartPosition", "InitialLongitudinalVelocity"}
+    for property_name, value in properties.items():
+        if property_name not in allowed_properties:
+            raise ValueError(
+                "Ego longitudinalProfileJson supports only StartPosition and InitialLongitudinalVelocity."
+            )
+        _validate_maneuver_number(value, f"longitudinalProfileJson.{property_name}")
+
+
+def _validate_fellow_longitudinal_properties(properties: dict[str, Any]) -> dict[str, Any]:
+    if not properties:
+        return properties
+    if {"StartPosition", "InitialLongitudinalVelocity"}.intersection(properties):
+        raise ValueError(
+            "StartPosition and InitialLongitudinalVelocity are ego-only sequence properties, not fellow properties. "
+            "Select the ego (active) or provide an explicit fellow Position or Velocity behavior profile."
+        )
+    if len(properties) != 1:
+        raise ValueError(
+            "A fellow segment supports only one longitudinal profile (Position or Velocity); "
+            "Position and Velocity cannot be combined."
+        )
+    if set(properties) == {"Constant"}:
+        raise ValueError(
+            "Fellow Constant is ambiguous; explicitly select Position and YawAngleConstant, or Velocity and Constant."
+        )
+
+    profile_name, value = next(iter(properties.items()))
+    source_name = {"Position": "YawAngleConstant", "Velocity": "Constant"}.get(profile_name)
+    if source_name is None or not isinstance(value, dict):
+        raise ValueError("A fellow longitudinal profile must select exactly one Position or Velocity profile.")
+
+    source_properties = value
+    if set(source_properties) != {source_name} or not isinstance(source_properties[source_name], dict):
+        raise ValueError(f"A fellow {profile_name} profile must select exactly one {source_name} source.")
+
+    constant_properties = source_properties[source_name]
+    if set(constant_properties) != {"Constant"}:
+        raise ValueError(f"The {source_name} source supports only its Constant property for this request.")
+    _validate_maneuver_number(constant_properties["Constant"], f"longitudinalProfileJson.{profile_name}.{source_name}.Constant")
+    return properties
+
+
+def _validate_maneuver_number(value: Any, parameter_name: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ValueError(f"{parameter_name} must be a finite JSON number.")
+    try:
+        is_finite = math.isfinite(value)
+    except OverflowError as exc:
+        raise ValueError(f"{parameter_name} is outside the supported finite range.") from exc
+    if not is_finite:
+        raise ValueError(f"{parameter_name} must be a finite JSON number.")
 
 
 def _validate_scalar_property_object(data: dict[str, Any], parameter_name: str, depth: int) -> None:
@@ -892,7 +1057,10 @@ def _validate_spline_parameter(parameter: RoadSplineParameterSpec | None, parame
 def _parse_finite_double(value: Any, path: str) -> float:
     if isinstance(value, bool) or not isinstance(value, int | float):
         raise ValueError(f"{path} must be a JSON number.")
-    result = float(value)
+    try:
+        result = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{path} is outside the supported finite range.") from exc
     _validate_finite(result, path)
     return result
 

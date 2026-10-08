@@ -2,8 +2,11 @@
 
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
+import os
 from pathlib import Path
 import re
+import subprocess
+import sys
 
 import pytest
 
@@ -14,6 +17,33 @@ from modeldesk_mcp.tools import EXPECTED_TOOL_NAMES, TOOL_DOMAIN_BY_NAME, TOOL_D
 SKILL_PATH = Path(__file__).resolve().parents[1] / ".github" / "skills" / "modeldesk-mcp-tools" / "SKILL.md"
 BEGIN_MARKER = "<!-- BEGIN TOOL INDEX -->"
 END_MARKER = "<!-- END TOOL INDEX -->"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows batch launcher.")
+@pytest.mark.parametrize(("tool_name", "expected_prefix"), (("uv", "--directory "), ("py", "-3.14 -m uv --directory ")))
+@pytest.mark.parametrize("exit_code", (0, 7))
+def test_windows_launcher_resolves_uv_and_preserves_exit_code(
+    tmp_path: Path, tool_name: str, expected_prefix: str, exit_code: int
+) -> None:
+    launcher = SKILL_PATH.parents[3] / "ModelDeskMCP.cmd"
+    (tmp_path / f"{tool_name}.cmd").write_text(f"@echo %*\n@exit /b {exit_code}\n", encoding="ascii")
+    environment = os.environ.copy()
+    environment["PATH"] = os.pathsep.join((str(tmp_path), str(Path(environment["SYSTEMROOT"]) / "System32")))
+
+    result = subprocess.run(
+        [environment["COMSPEC"], "/d", "/c", str(launcher), "--list-tools"],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == exit_code
+    assert result.stderr == ""
+    assert result.stdout.startswith(expected_prefix)
+    assert f'"{launcher.parent}\\."' in result.stdout
+    assert result.stdout.rstrip().endswith("run python -m modeldesk_mcp.server --list-tools")
 
 
 @pytest.mark.parametrize(
