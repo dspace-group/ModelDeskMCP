@@ -112,6 +112,15 @@ def test_expected_tool_names_have_expected_count_and_are_unique() -> None:
     assert len(set(EXPECTED_TOOL_NAMES)) == 83
 
 
+def test_documented_tool_inventory_matches_registry() -> None:
+    reference_path = SKILL_PATH.parents[3] / "docs" / "tools.md"
+    reference = reference_path.read_text(encoding="utf-8")
+    names = re.findall(r"^\| `(modeldesk_[a-z0-9_]+)` \|", reference, re.MULTILINE)
+
+    assert len(names) == len(set(names)) == len(EXPECTED_TOOL_NAMES)
+    assert set(names) == set(EXPECTED_TOOL_NAMES)
+
+
 def test_skill_markers_and_index_parity() -> None:
     skill = SKILL_PATH.read_text(encoding="utf-8")
     begin = skill.index(BEGIN_MARKER)

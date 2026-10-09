@@ -1,97 +1,236 @@
-# ModelDeskMCP Use Cases
+# Use Cases
 
-This page summarizes the main engineering use cases supported by ModelDesk, based on the official dSPACE documentation retrieved through the MCP server.
+[../README.md](../README.md) | [tools.md](tools.md) | [error-handling.md](error-handling.md)
 
-## 1. Parameterize ASM-Based Vehicle Models
+These workflows describe the current MCP tool surface, not every feature available in the ModelDesk UI. Use [tools.md](tools.md) for the complete inventory and inspect capabilities before assuming a domain is usable.
 
-ModelDesk is used to navigate through vehicle model hierarchies and edit scalar, vector, matrix, and table parameters. This is the baseline use case for configuring simulation variants for controller development, calibration, and validation.
+Example names, paths, and indices are illustrative. Replace them with values from your active project and fresh listings. The JSON blocks are tool arguments, not commands that run automatically; fields ending in `Json` intentionally contain serialized JSON strings.
 
-As a Customer/User of ModelDesk, I want to configure vehicle-model parameters in a controlled experiment context so that I can create, compare, and reuse simulation-ready variants without editing model internals manually.
+## Before Any Workflow
 
-For the MCP server scope, this use case must include selecting the active project, experiment, model, and parameter set; reading parameter metadata and current values; changing scalar and structured parameter values; and saving the resulting parameter set or project state. Parameterization tools should preserve explicit parameter paths, units, value types, and validation feedback so scripted changes remain traceable.
+1. Read `modeldesk_get_status` and `modeldesk_get_capabilities`.
+2. Verify the active project and experiment; switch context only when intended.
+3. List the relevant collection and resolve the target explicitly.
+4. Plan edits separately from Save, Download, processing, test execution, and runtime controls.
+5. After each dependent operation, inspect its result before continuing.
 
-Typical outcomes:
+For discovery, arguments for `modeldesk_list_tools_by_use_case`:
 
-- vehicle variant setup
-- subsystem tuning
-- repeatable parameter changes across experiments or parameter sets
-- scripted calibration preparation for HIL, SIL, or offline simulation
-- parameter-set comparison across experiments
+```json
+{
+	"useCase": "UC3"
+}
+```
 
-## 2. Build Roads for Simulation and Visualization
+This is local lookup, not an execution request. Use-case lists can overlap for shared tools.
 
-The Road Generator supports the creation of road elements, junctions, profiles, surfaces, and scenery. The official documentation states that the generated road data is used both for simulation and for AURELION visualization.
+## UC1: Parameterize Vehicle Models
 
-As a Customer/User of ModelDesk, I want to generate and modify roads from structured engineering input so that I can build reproducible proving-ground, curved-road, lane-guidance, and sensor-simulation road networks without drawing each element manually.
+**Goal:** Edit vehicle-model parameters in a known experiment and parameter-set context.
 
-For the MCP server scope, this use case must include creating and modifying a complete road network from structured input, not only activating or inspecting existing roads. A RoadNetwork corresponds to an `.rd` file and can contain multiple Roads. A Road is built from ordered Segments, can have Lanes and LaneSections, can contain traffic objects, and can be connected to other Roads through start/end connection points for predecessor/successor style road chains.
+1. List and activate the intended experiment and parameter set.
+2. Inspect the active model with `modeldesk_get_active_model_info`; change the binding only if necessary.
+3. Read the parameterization summary and each intended parameter by its exact path.
+4. Use the scalar or typed JSON setter, then read the value back.
+5. Save the project or experiment only when required. Run processing as a separate, explicit action after inspecting its configuration.
 
-Road geometry must support segment types, because this is how the road course is defined. At minimum, structured road creation and modification must support `Straight`, `Circular`, `Clothoid`, and `Spline` segments. Segment-specific properties should be represented explicitly, for example length for straight sections, radius and angle for circular sections, radius and infinite-radius handling for clothoids, and end-vector or parameter-based definitions for splines. This is required to generate curves, transitions, and more realistic road courses.
+Arguments for `modeldesk_set_parameter_value`:
 
-A basic road creation workflow should accept road length, lane counts, lane widths, segment definitions, and traffic-object placements with explicit road-relative `s` and `d` positions. If a new RoadNetwork file is requested, automation must create it through `Application.ActiveProject.Pool.CreateFile(0, name, overwriteExisting)`, for example `CreateFile(0, "OvertakeRoad", false)` to create `OvertakeRoad.rd`, before the RoadNetwork is activated or populated. More advanced workflows should cover RoadNetwork save/save-as, road-to-road connections, lane-section updates, road-object updates, OpenDRIVE export, junctions, surfaces, scenery, and AURELION synchronization.
+```json
+{
+	"parameterPath": "Vehicle.Speed",
+	"valueKind": "Scalar",
+	"valueJson": "1200.0"
+}
+```
 
-Typical outcomes:
+Supported typed shapes are Scalar, Text, Vector, Matrix, and Table. Valid structure and dimensions depend on the selected shape and parameter. Paths must be known exactly: there is no general parameter enumeration or automatic unit conversion workflow. Check reported type/unit metadata before writing.
 
-- proving-ground style road networks
-- complete straight, curved, clothoid-transition, or spline-based roads generated from user-provided dimensions
-- new RoadNetwork files created through the project pool with CreateFile type `0`
-- RoadNetwork `.rd` files containing one or more connected Roads
-- Road predecessor/successor chains through start/end connection points
-- configurable lane count and lane width per road side
-- traffic objects or scene assets placed at defined `s` and `d` road coordinates
-- road-surface and lane variations
-- road contexts prepared for 3D animation and sensor simulation
+Processing summary/configuration can be incomplete in some installations. Null fields or collection errors are not proof that processing is configured correctly.
 
-## 3. Define Scenarios and Traffic Behavior
+**Recipes:** `parameterize_vehicle_variant`, `run_processing_and_save_parameter_set`.
 
-The Scenario Editor is used to define the movement of the ego vehicle and other traffic participants. This supports scenario-driven verification and replay of traffic situations.
+## UC2: Build Roads
 
-As a Customer/User of ModelDesk, I want to define scenario participants, maneuvers, and behavior timing in a reusable way so that I can verify how a vehicle model behaves in specific traffic situations.
+**Goal:** Author roads in an active Road Network for simulation and visualization.
 
-For the MCP server scope, this use case must go beyond activating an existing scenario. It should include selecting or creating the active traffic scenario, managing fellows or other traffic participants, assigning traffic-object and driver references, defining maneuvers, building maneuver sequences, and setting longitudinal and lateral behavior profiles. If a new Traffic Scenario file is requested, automation must create it through `Application.ActiveProject.Pool.CreateFile(1, name, overwriteExisting)` before activation and authoring. Scenario tools should keep object references explicit, because scenarios depend on roads, traffic objects, drivers, and experiment context.
+A Road Network is a pool file containing roads; each road contains ordered segments, lane sections, and road-local traffic objects. Creating a pool file and editing the active network are separate steps.
 
-The initial properties **Initial longitudinal velocity** and **Start position on route** belong only to the ego vehicle/maneuver sequence, not to fellows. Select the ego with `fellowSelectorKind="active"` and pass `{"StartPosition":70.0,"InitialLongitudinalVelocity":20.0}` to `modeldesk_set_maneuver_behavior_profiles`; route start position is meters and initial longitudinal velocity is km/h, passed unchanged.
+1. Inspect Road Environment Pool files with `modeldesk_list_environment_pool_items`.
+2. If a new file is needed, create it with `modeldesk_create_road_network`, with overwrite disabled unless intended.
+3. Activate and inspect the target network before adding or editing roads.
+4. Add/update segments, configure lanes, place road-local objects, and connect endpoints as needed.
+5. Reinspect the result before Save, Download, or AURELION synchronization.
 
-Fellows can be created without yaw or behavior-profile values. To edit their longitudinal behavior, discover their sequences with `modeldesk_list_fellow_activities` and provide an explicit profile such as `{"Position":{"YawAngleConstant":{"Constant":70.0}}}` or `{"Velocity":{"Constant":{"Constant":20.0}}}`. These target the first segment's behavior profile, not ego initial fields. The tool reads back the value as `data.details.longitudinalPosition` or `data.details.longitudinalVelocity` before Save or Download. A fellow segment has only one active longitudinal profile; selecting Position or Velocity replaces the active longitudinal mode. Neither ego-only initial property is accepted for a fellow.
+Arguments for `modeldesk_create_basic_road` in the already-active network:
 
-The verified Traffic Editor automation interface exposes maneuver collection access and an immutable `Maneuver.Index`, but no reorder member. `modeldesk_set_scenario_maneuver_sequence` therefore accepts only a requested order that already matches the current order; a changed order returns a structured unsupported error before Save or Download. Sequence reordering remains unavailable until a source-backed API is verified.
+```json
+{
+	"name": "ExampleRoad",
+	"length": 80.0,
+	"leftLaneCount": 1,
+	"rightLaneCount": 1,
+	"laneWidth": 3.5,
+	"trafficObjectsJson": "[]",
+	"save": false,
+	"download": false
+}
+```
 
-Typical outcomes:
+The basic helper creates a straight road. Use individual segment tools for Straight, Circular, Clothoid, or Spline geometry and the validated property schema for that type. Road-local objects use longitudinal `s` and lateral `d` in meters. Connections select Start/End endpoints and Move/Modify adaptation.
 
-- maneuver-based tests
-- surrounding traffic behavior
-- ego and fellow vehicle movement definitions
-- reusable maneuver sequences for regression testing
-- regression scenarios for ADAS and vehicle dynamics features
+Segment input indices are zero-based, while a returned COM segment `Index` can be one-based. Resolve the actual collection index before an update or removal. Compound road creation is not atomic; a failed later step can leave a newly created road or segment in memory.
 
-## 4. Manage Traffic Objects and Scene Assets
+The MCP registry does not expose general OpenDRIVE export, junction authoring, or arbitrary surface/scenery editing tools. Do not treat broader Road Generator features as available MCP operations.
 
-The Traffic Object Manager provides reusable traffic participants and static roadside objects. These assets are then referenced by roads and scenarios.
+**Recipes:** `create_basic_road`, `sync_scene_to_aurelion`.
 
-As a Customer/User of ModelDesk, I want to manage traffic participants and static scene assets as a catalog so that roads and scenarios can reuse consistent objects with known geometry, behavior, and metadata.
+## UC3: Define Scenarios and Traffic
 
-For the MCP server scope, this use case must include reading and validating catalog entries, resolving object paths used by roads and scenarios, and preparing safe mutation tools for folders, static objects, dynamic traffic objects, and driver-related references. Tools should distinguish reusable catalog assets from road-local object placements and scenario participant instances.
+**Goal:** Author ego maneuvers and Fellow behavior in an explicitly selected scenario.
 
-Typical outcomes:
+1. Inspect Scenario and TrafficDriver Environment Pool files when their references are unknown.
+2. Create a scenario pool file if needed, then activate the intended scenario.
+3. Inspect its road, ego maneuvers, and Fellows; assign only verified road/catalog/driver references.
+4. Add or update Fellows and discover their activities/sequences before editing profiles.
+5. Read back the relevant values before Save/Download. Start, stop, or reset execution only as an explicit runtime step.
 
-- standardized object catalogs
-- consistent static scenery across scenarios
-- reusable dynamic actors for traffic scenarios
-- validated catalog paths for road-object and scenario-object references
-- separation of asset definition, road placement, and scenario behavior
+### Fellow Creation and Sequences
 
-## 5. Analyze and Compare Simulation Results
+Arguments for `modeldesk_add_scenario_fellow`:
 
-The Plot Manager provides layouts and plotters for monitoring signals and comparing runs. This supports investigation after parameter, road, or scenario changes.
+```json
+{
+	"name": "Traffic1",
+	"save": false,
+	"download": false
+}
+```
 
-As a Customer/User of ModelDesk, I want to inspect and compare simulation signals after a run so that I can understand whether parameter, road, or scenario changes improved or degraded behavior.
+Creation requires neither yaw nor initial/profile values. A new Fellow may already have a sequence. Call `modeldesk_list_fellow_activities` before adding another; do not assume creation left an empty collection. Fellow-scoped maneuver tools operate on its sequences, not the ego maneuver collection.
 
-For the MCP server scope, this use case includes selecting plotting configurations, listing captures and layouts, identifying signals, and comparing MATLAB capture results with explicit tolerances. Capture file names are resolved from the active project's `WorkingRoot` under `Pool/Simulation/Measurements`; clients do not provide machine-specific absolute paths. Plotting and comparison tools return structured summaries, alignment details, numeric error metrics, and tolerance verdicts instead of only opening UI views.
+Use a freshly listed index for Fellow sequence deletion. Plain-name deletion is not supported by the verified live removal path and can fail without changing the collection.
 
-Typical outcomes:
+### Ego Initial Values
 
-- signal trend comparison
-- run-to-run regression analysis
-- quick inspection during calibration and validation loops
-- tolerance-based comparison of relevant signals from project-pool MATLAB captures
-- result artifacts that can be attached to automated validation reports
+Only the ego maneuver sequence has **Start position on route** (`StartPosition`, meters) and **Initial longitudinal velocity** (`InitialLongitudinalVelocity`, km/h). These are not Fellow properties.
+
+Arguments for `modeldesk_set_maneuver_behavior_profiles` targeting an ego maneuver:
+
+```json
+{
+	"fellowSelectorKind": "active",
+	"fellowSelectorValue": "active",
+	"maneuverSelectorKind": "index",
+	"maneuverSelectorValue": "0",
+	"longitudinalProfileJson": "{\"StartPosition\":70.0,\"InitialLongitudinalVelocity\":20.0}",
+	"lateralProfileJson": "{}",
+	"save": false,
+	"download": false
+}
+```
+
+Values pass through unchanged. The selected ego maneuver must have exactly one sequence; zero or multiple sequences are rejected because the tool has no separate ego sequence selector.
+
+### Fellow Behavior Profiles
+
+Fellows require explicit nested behavior-profile JSON. Arguments for `modeldesk_set_maneuver_behavior_profiles` targeting a sequence discovered on `Traffic1`:
+
+```json
+{
+	"fellowSelectorKind": "name",
+	"fellowSelectorValue": "Traffic1",
+	"maneuverSelectorKind": "index",
+	"maneuverSelectorValue": "0",
+	"longitudinalProfileJson": "{\"Velocity\":{\"Constant\":{\"Constant\":20.0}}}",
+	"lateralProfileJson": "{}",
+	"save": false,
+	"download": false
+}
+```
+
+The alternative Position payload is `{"Position":{"YawAngleConstant":{"Constant":70.0}}}`. Both target the first segment's longitudinal behavior. Position and Velocity are mutually exclusive alternatives; activating one changes the longitudinal mode. They are not aliases for ego initial values, and submitting either ego-only field for a Fellow is rejected before COM traversal.
+
+Verify `data.details.longitudinalPosition` or `data.details.longitudinalVelocity` on a successful response. Lateral behavior has no universal schema; leave `lateralProfileJson` as `{}` unless the exact selected interface is verified.
+
+### Ordering and References
+
+`modeldesk_set_scenario_maneuver_sequence` can confirm an already-matching order. It rejects a changed order before Save/Download because the interface exposes immutable maneuver indices and no verified reorder member. Do not rewrite indices or recreate existing content as an implicit workaround.
+
+Scenario-road identity fields can be null, and selectable vehicle-type lists can contain placeholder labels. Check the setter result and relevant live context instead of inventing paths or declaring those fields verified.
+
+**Recipe:** `create_basic_traffic_scenario`. Recipe wording is guidance, not permission to bypass these current limits or automatically start execution.
+
+## UC4: Manage Traffic Objects
+
+**Goal:** Inspect and validate reusable Traffic Object Manager assets before assigning them to roads or participants.
+
+1. Read capabilities and the traffic-object summary.
+2. List catalog objects and folders.
+3. Validate a selected reference before assigning it elsewhere.
+4. Add/remove catalog objects or folders only when the installation exposes mutation support.
+
+Keep three concepts separate: reusable catalog entries, road-local placements, and scenario Fellow instances. Environment Pool files are another collection; an empty TOM catalog does not mean there are no filesystem-backed assets.
+
+Reference names and paths are installation-specific. Reuse returned values rather than constructing a catalog path or driver reference from a display label.
+
+**Recipe:** `manage_traffic_objects`.
+
+## UC5: Test and Analyze Results
+
+**Goal:** Inspect test content and compare simulation captures with explicit numerical criteria.
+
+### Testing
+
+Activate an existing test configuration, inspect its summary, list logical cases, then list concrete cases under one selected logical case. An absent or inaccessible active test is a context failure, not an empty successful test run.
+
+`modeldesk_execute_test` is an execution request, not a read-only inspection. Select only a supported scope from its current schema and ensure required project/runtime content is available.
+
+### Plotting and Capture Comparison
+
+Inspect/activate plotting and list captures/layouts as needed. The comparison tool reads capture files from the active project's `WorkingRoot/Pool/Simulation/Measurements`; listing an open plot capture is not required to supply a valid file there.
+
+Arguments for `modeldesk_compare_captures`:
+
+```json
+{
+	"referenceCapture": "reference.mat",
+	"candidateCapture": "candidate.mat",
+	"signalSpecsJson": "[\"Vehicle.Speed\"]",
+	"tolerancesJson": "{\"rootMeanSquaredError\":0.1}"
+}
+```
+
+Only filenames ending in `.mat` are accepted, without directory components. Each file is limited to 512 MiB and must be a readable MATLAB 5 capture with the expected root X/Y measurement structure: time data in `X.Data`, and signal `Name`, `Data`, and `Unit` in `Y`. Arbitrary MAT structures and MATLAB 7.3/HDF5 files are not supported by this loader.
+
+An empty signal list `[]` selects common names. Objects with `reference` and `candidate` can map differently named signals. Supported tolerance metrics are `meanAbsoluteError`, `rootMeanSquaredError`, and `maximumAbsoluteError`, globally or under `signals` keyed by reference name. Thresholds must be finite and non-negative.
+
+The comparison reports alignment, overlap, finite sample counts, units, metrics, and verdict. It can interpolate candidate data onto reference timestamps within their common interval; it does not automatically convert units. Inspect each signal's status as well as the overall verdict, which considers evaluated signals only.
+
+`ok=true` means comparison completed, not that tolerances passed. The verdict is `passed`, `failed`, or `notEvaluated`; missing thresholds or fewer than two finite overlapping samples can leave a signal unevaluated. No capture is modified and no report file is automatically generated.
+
+**Recipes:** `execute_regression_test`, `plot_and_compare_two_runs`.
+
+## Dry-run Recipe Index
+
+Arguments for `modeldesk_get_workflow_plan`:
+
+```json
+{
+	"workflowName": "create_basic_traffic_scenario"
+}
+```
+
+| Recipe | Purpose |
+| --- | --- |
+| `automation_session_smoke` | Plan status, capability, and context inspection. |
+| `parameterize_vehicle_variant` | Plan model/parameter-set selection and parameter edits. |
+| `run_processing_and_save_parameter_set` | Plan configured processing and intentional persistence. |
+| `create_basic_road` | Plan road-pool setup and active-network authoring. |
+| `create_basic_traffic_scenario` | Plan scenario/Fellow/maneuver authoring within the limits above. |
+| `manage_traffic_objects` | Plan catalog inspection and reference validation. |
+| `execute_regression_test` | Plan activation, inspection, and explicit test execution. |
+| `plot_and_compare_two_runs` | Plan plotting inspection and MAT capture comparison. |
+| `sync_scene_to_aurelion` | Plan explicit runtime download and visualization synchronization. |
+
+Plans are local, dry-run-only guidance. They neither validate the complete live environment nor execute, save, or download anything. Apply the current tool schemas and domain restrictions even when recipe wording is broader.

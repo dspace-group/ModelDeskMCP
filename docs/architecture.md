@@ -1,117 +1,84 @@
 # Architecture
 
-This repository contains a small Python server that exposes ModelDesk automation as a local MCP endpoint over stdio. The public-safe architecture is intentionally limited to the server’s own runtime boundaries and does not describe proprietary product internals beyond the local COM integration points required to operate the automation layer.
+[../README.md](../README.md) | [tools.md](tools.md) | [extending.md](extending.md)
 
-## 1. Local stdio host
+ModelDesk MCP is a Python 3.14 source-checkout server using the **MCP Python SDK 2.x**, its `MCPServer` class, local stdio, and a centralized Windows COM bridge. Its layers separate protocol handling, domain requests, and thread-affine automation.
 
-The server is started from the checkout launcher or Python module entry point and runs as a local stdio application. The host process connects to the MCP server over standard input and output; no network listener is required for the default public execution model.
+## Request Flow
 
-The entrypoint in the repository is intentionally narrow:
+```mermaid
+flowchart LR
+	Client["Local MCP Client"] --> Host["MCPServer / stdio"]
+	Host --> Registry["Tool Registry"]
+	Registry --> Service["ModelDeskService"]
+	Service --> Catalog["Dry-run Workflow Catalog"]
+	Service --> Gateway["Automation Gateway"]
+	Gateway --> STA["Bounded STA Dispatcher"]
+	STA --> ModelDesk["Local ModelDesk / COM"]
+```
 
-- launch script or `python -m modeldesk_mcp`
-- `main()` in the server module
-- metadata flags such as `--version`, `--list-tools`, `--list-resources`, and `--list-prompts` that return immediate output without starting the full COM-backed runtime
-- normal execution path that boots the full FastMCP application
+Planning stays in the local catalog. A workflow plan describes lower-level calls; it does not execute them or provide transaction handling.
 
-## 2. FastMCP server runtime
+## Module Responsibilities
 
-The server creates a `FastMCP` instance using the MCP Python SDK v1 API that is compatible with the project’s supported dependency line. This app owns the public MCP surface: tool registration, request dispatch, stdio transport, and the CLI metadata mode.
+| Module | Responsibility |
+| --- | --- |
+| [../ModelDeskMCP.cmd](../ModelDeskMCP.cmd) | Resolve the checkout, invoke uv or its Python-module fallback, forward arguments and exit codes. |
+| [../src/modeldesk_mcp/server.py](../src/modeldesk_mcp/server.py) | CLI metadata, MCPServer application creation, and stdio entry point. |
+| [../src/modeldesk_mcp/tools/registry.py](../src/modeldesk_mcp/tools/registry.py) | Fixed names, owner domains, SDK-native input descriptions/examples, output envelope, service wrappers. |
+| [../src/modeldesk_mcp/contracts/requests.py](../src/modeldesk_mcp/contracts/requests.py) | Typed request parsing and operation-specific validation. |
+| [../src/modeldesk_mcp/contracts/models.py](../src/modeldesk_mcp/contracts/models.py) | Result models, serialization, and exception-message path redaction. |
+| [../src/modeldesk_mcp/contracts/use_cases.py](../src/modeldesk_mcp/contracts/use_cases.py) | Canonical UC1-UC5/Supporting tool tags and query normalization. |
+| [../src/modeldesk_mcp/domain/service.py](../src/modeldesk_mcp/domain/service.py) | Public service methods and routing to the gateway/catalog. |
+| [../src/modeldesk_mcp/domain/workflow_catalog.py](../src/modeldesk_mcp/domain/workflow_catalog.py) | Named, local dry-run recipes. |
+| [../src/modeldesk_mcp/domain/capture_comparison.py](../src/modeldesk_mcp/domain/capture_comparison.py) | Read-only project-local MAT parsing, signal alignment, metrics, and tolerance evaluation. |
+| [../src/modeldesk_mcp/com_bridge/gateway.py](../src/modeldesk_mcp/com_bridge/gateway.py) | Context resolution, ModelDesk operations, readback, persistence controls, structured failures. |
+| [../src/modeldesk_mcp/com_bridge/dispatcher.py](../src/modeldesk_mcp/com_bridge/dispatcher.py) | COM initialization, a single STA worker, bounded submission, wait timeout, and shutdown. |
+| [../src/modeldesk_mcp/com_bridge/accessor.py](../src/modeldesk_mcp/com_bridge/accessor.py) | Late-bound property/member access, selectors, and collection snapshots. |
+| [../src/modeldesk_mcp/config.py](../src/modeldesk_mcp/config.py) | Environment-based ProgID, timeout, and collection limits. |
 
-The public contract is intentionally explicit. Tool names are registered in a dedicated registry module and exposed to the host as typed MCP tool calls. The server does not promise dynamic discovery beyond the checked registry and the metadata commands listed above.
+## Public Contract
 
-## 3. Registry and tool wrappers
+The registry exposes exactly 83 explicit `modeldesk_` names. Tools are not discovered from arbitrary source files at runtime. No MCP resources or prompts are registered.
 
-The adapter layer registers tool definitions into the FastMCP app through a registry wrapper. In public terms, the registry sits between the host-facing MCP surface and the business logic service layer.
+MCPServer receives SDK-supported `Annotated`/`Field` parameter metadata and a typed output envelope. MCP validation and typed request validation complement each other: the former describes outer arguments, while the latter checks JSON payloads and domain-specific constraints.
 
-This pattern keeps the tool contract stable:
+All handler results serialize the seven fields documented in [error-handling.md](error-handling.md). Nested `data` stays operation-specific. Wrappers forward to service methods and never perform direct COM work.
 
-- registry defines the public tool names and schema metadata
-- tool wrappers translate function arguments into the service call model
-- the service layer does not directly depend on the stdio transport or the host protocol details
-- the server returns structured `ToolResult` dictionaries for user-recoverable outcomes instead of throwing application-level exceptions into the host
+## Ownership and Use Cases
 
-For this repo, the public tool domain is intentionally centered on the five supported areas already defined in the registry:
+The five internal owner domains are:
 
-1. General COM Automation — the general ownership bucket for lifecycle, parameter, processing, testing, and workflow tools that do not belong to one of the specialized domains.
-2. Scenario/TrafficScenario — scenario orchestration and traffic-scenario operations.
-3. Road/RoadGenerator — road network creation, activation, editing, and road-generation utilities.
-4. Plotting/PlotManager — plotting, capture, comparison, and plot-management operations.
-5. TrafficObjectManager/TrafficObject/TOM — traffic object catalog, folder management, and traffic-object manager operations.
+| Domain | Owns |
+| --- | --- |
+| General COM Automation | Lifecycle, pools, models, parameters, processing, testing, and planning. |
+| Scenario/TrafficScenario | Scenario content, Fellows, maneuvers, references, and maneuver runtime controls. |
+| Road/RoadGenerator | Road networks, roads, segments, lanes, road-local objects, and connections. |
+| Plotting/PlotManager | Plotting configurations, captures/layouts, and capture comparison. |
+| TrafficObjectManager/TrafficObject/TOM | Catalog objects, folders, and reference validation. |
 
-These are the five public domain labels and ownership boundaries enforced by the registry, and they are intentionally not redefined as a separate project taxonomy. The exact names and behavior are the source of truth for the runtime, and they are not rewritten here to avoid a public contract drift.
+Each tool has one owner domain but can have multiple use-case tags. The six functional groups in [tools.md](tools.md) are a reader-oriented inventory, not additional runtime domains.
 
-## 4. ModelDeskService and workflow catalog
+## COM Lifecycle and Ordering
 
-The runtime creates a service object that owns the domain model for automation operations. This service coordinates workflow selection, execution orchestration, and state management for the ModelDesk automation layer.
+The gateway keeps the application connection within the bridge and resolves the active project, experiment, and selected child objects for each operation. Do not retain deep COM child objects across requests: activation, deletion, or other user actions can invalidate them.
 
-The service is not the COM transport itself. It consumes a gateway abstraction and applies the repository’s explicit workflow catalog, so the public logic remains stable while the underlying automation layer can be swapped or reselected by selector without exposing product internals.
+Automation callbacks run on one STA worker. A bounded queue prevents unlimited submissions; accepted work and dispatcher shutdown are coordinated. Queue serialization does not define dependency order between concurrently submitted MCP calls. Clients must await a mutation before issuing a dependent read or write.
 
-## 5. ModelDeskAutomationGateway and COM boundary
+The default 60-second timeout bounds the caller's wait. It does not interrupt ModelDesk or cancel queued/running COM work. Collection snapshots default to at most 500 items and can report truncation. Configuration details are in [clients.md](clients.md).
 
-The service talks to a gateway object that isolates the automation layer from MCP transport concerns. The gateway is the boundary where the server can interact with local Windows COM automation without exposing those calls directly to the tool registry.
+## Mutation and Recovery Boundaries
 
-The public-safe boundary is:
+Typed request validation rejects invalid inputs before mutation where possible. Some decisions require a live COM object. Compound operations can still fail after an earlier step has changed in-memory state; there is no automatic rollback.
 
-- service layer stays domain-oriented
-- gateway handles automation coordination and command translation
-- COM-specific access stays behind the dedicated bridge package
-- all external automation calls are routed through a dispatcher that enforces threading and lifecycle safety
+Supported profile updates read back assigned values before optional Save/Download. A failed readback or later persistence action does not reverse preceding assignments. Immutable maneuver indices are never used as a reordering mechanism.
 
-## 6. ComStaDispatcher STA thread
+Exception-derived errors pass through local-path redaction. Domain data and artifact references can retain useful project paths. This local integration has no authentication or remote isolation layer; treat the client as a trusted caller with the server process's permissions.
 
-The dispatch layer runs automation operations on an STA thread. This is the boundary used to keep COM access safe and deterministic on Windows. The dispatcher does not cache deep child objects across tool calls; instead, it reacquires the target object or selector state per operation.
+## Verification Boundaries
 
-This is a security and reliability requirement. The public architecture must avoid keeping long-lived references to deep COM object graphs, because those references can go stale and create invalid automation state between requests.
+Metadata flags bypass application/runtime creation. Deterministic tests use source-shaped fakes and SDK schema checks; the COM-free smoke check verifies protocol discovery and safe local paths without requiring ModelDesk.
 
-## 7. COM accessor and local ModelDesk runtime
+GitHub CI checks Windows/Python 3.14 installation, launcher metadata, syntax, pytest, and COM-free smoke behavior. These gates do not certify project-specific processing, test execution, downloads, AURELION, or every live COM object shape. Live checks need controlled fixtures and explicit mutation/runtime intent.
 
-The underlying Windows-side COM accessor opens the local ModelDesk automation object when required and uses the active selector to reacquire a fresh object reference for each tool call. The server keeps the COM access narrow and explicit, rather than caching nested child objects across requests.
-
-This reduces the risk of stale handles, thread-affinity problems, and cross-request state leakage. In other words, the request path is:
-
-1. stdio host sends an MCP request
-2. FastMCP server resolves the registered tool
-3. registry wrapper calls the domain service
-4. service requests the automation gateway
-5. gateway dispatches the call through the STA thread
-6. COM accessor reacquires the selector target and performs the local automation work
-7. result is converted into a structured `ToolResult` response
-
-## 8. Request flow and `ToolResult` response model
-
-The request lifecycle is intentionally simple and predictable:
-
-- the host sends a tool call over stdio
-- the MCP runtime resolves the tool name
-- the wrapper validates input and forwards the request to the service
-- the service executes the workflow or automation action
-- the gateway performs the COM-bound step through the STA dispatcher
-- the final result is normalized into a structured `ToolResult` dictionary
-
-Structured error output is used for user-recoverable problems. The public contract avoids leaking low-level COM details or internal stack traces into the host. Bounded timeouts help prevent long-running desktop automation calls from hanging the server or the client session.
-
-## 9. Redacted errors, bounded timeouts, and selector safety
-
-The server follows a narrow error boundary:
-
-- domain and automation failures are converted into structured, redacted results
-- host-facing messages omit internal private implementation details
-- long-running operations are bounded by configured timeouts
-- selector-based reacquisition is used instead of deep COM object retention
-
-This keeps the server robust under repeated tool calls without creating stale references or letting the client see internal implementation details.
-
-## 10. Extension and testing boundaries
-
-This public architecture intentionally separates the supported extension boundary from internal implementation details:
-
-- the public extension boundary is the MCP tool registry, tool metadata, and the domain service contract
-- seller-specific or private product architecture is not documented here
-- backend implementation and runtime behavior are not changed in this task
-- deterministic tests remain separate from live COM automation and are designed to exercise the public logic without requiring a live ModelDesk runtime
-
-The same boundary also applies to the repository’s testing model: unit and smoke tests validate the public contract, local metadata commands, compile integrity, and COM-free behavior without depending on a live desktop automation session.
-
-## 11. Summary
-
-The public architecture is therefore a narrow local stdio host -> FastMCP -> registry wrappers -> ModelDeskService -> gateway -> ComStaDispatcher -> COM accessor -> local ModelDesk automation pipeline. The server remains explicit, bounded, and safe: tool calls are structured, errors are redacted, COM references are reacquired by selector rather than cached deeply, and the public docs stay within the repository’s supported, public-safe contract.
+Use [extending.md](extending.md) when adding behavior and [error-handling.md](error-handling.md) when designing recovery.
