@@ -133,6 +133,7 @@ class DomainSummary:
     items: tuple[ItemSummary, ...]
     properties: dict[str, str | None]
     message: str | None = None
+    next_offset: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

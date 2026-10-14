@@ -71,3 +71,27 @@ def test_gateway_lists_only_selected_environment_pool_group(
     assert data["available"] is True
     assert data["count"] == 2
     assert {item["path"].lower().endswith(f"target{extension}".lower()) or item["path"].lower().endswith(f"nested{extension}".lower()) for item in data["items"]} == {True}
+
+
+def test_environment_pool_pages_are_sorted_and_return_total_count(tmp_path: Path) -> None:
+    group_directory = tmp_path / "Pool" / "Environment" / "Road"
+    group_directory.mkdir(parents=True)
+    for name in ("c", "a", "b"):
+        (group_directory / f"{name}.rd").write_text("", encoding="utf-8")
+
+    gateway = object.__new__(ModelDeskAutomationGateway)
+    gateway._dispatcher = _InlineDispatcher()  # type: ignore[attr-defined]
+    gateway._options = ComGatewayOptions(max_collection_items=2)  # type: ignore[attr-defined]
+    gateway._session_id = "test-session"  # type: ignore[attr-defined]
+    gateway._application = SimpleNamespace(  # type: ignore[attr-defined]
+        ActiveProject=SimpleNamespace(WorkingRoot=str(tmp_path))
+    )
+
+    first_page = gateway.list_environment_pool_items("Road", recursive=False)
+    second_page = gateway.list_environment_pool_items("Road", recursive=False, offset=first_page.data.next_offset)
+
+    assert first_page.data.count == 3
+    assert tuple(item.name for item in first_page.data.items) == ("a", "b")
+    assert first_page.data.next_offset == 2
+    assert tuple(item.name for item in second_page.data.items) == ("c",)
+    assert second_page.data.next_offset is None

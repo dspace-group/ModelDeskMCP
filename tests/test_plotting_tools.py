@@ -29,6 +29,18 @@ def test_snapshot_collection_supports_safearray_tuple_values() -> None:
     assert not snapshot.is_truncated
 
 
+def test_snapshot_collection_returns_next_offset_for_each_page() -> None:
+    collection = ("Run A", "Run B", "Run C")
+
+    first_page = com.snapshot_collection(collection, "capture", 2)
+    second_page = com.snapshot_collection(collection, "capture", 2, first_page.next_offset or 0)
+
+    assert tuple(item.name for item in first_page.items) == ("Run A", "Run B")
+    assert first_page.next_offset == 2
+    assert tuple(item.name for item in second_page.items) == ("Run C",)
+    assert second_page.next_offset is None
+
+
 def test_list_plot_captures_uses_capture_manager_collection() -> None:
     plotting = SimpleNamespace(Captures=SimpleNamespace(OpenCaptures=("Run A", "Run B")))
     gateway = _gateway_executing_inline()
@@ -39,6 +51,21 @@ def test_list_plot_captures_uses_capture_manager_collection() -> None:
     assert summary.domain == "plotting.captures"
     assert tuple(item.name for item in summary.items) == ("Run A", "Run B")
     assert summary.properties["collection.selected"] == "OpenCaptures"
+
+
+def test_list_plot_captures_returns_next_offset_for_follow_up_page() -> None:
+    plotting = SimpleNamespace(Captures=SimpleNamespace(OpenCaptures=("Run A", "Run B", "Run C")))
+    gateway = _gateway_executing_inline()
+    gateway._options = ComGatewayOptions(max_collection_items=2)  # type: ignore[attr-defined]
+    gateway._application = _application_with_plotting(plotting)  # type: ignore[attr-defined]
+
+    first_page = gateway.list_plot_captures()
+    second_page = gateway.list_plot_captures(first_page.next_offset)
+
+    assert tuple(item.name for item in first_page.items) == ("Run A", "Run B")
+    assert first_page.next_offset == 2
+    assert tuple(item.name for item in second_page.items) == ("Run C",)
+    assert second_page.next_offset is None
 
 
 def test_list_plot_layouts_uses_layout_manager_collection() -> None:

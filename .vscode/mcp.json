@@ -5,6 +5,21 @@
       "command": "${workspaceFolder}\\ModelDeskMCP.cmd",
       "args": [],
       "cwd": "${workspaceFolder}"
+    },
+    "dSPACE-Architecture-Wiki": {
+            "type": "http",
+            "url": "https://architecture.mcp.dspace-dev.com/mcp"
+        },
+        "dSPACE-Documentation": {
+            "type": "http",
+            "url": "https://udls-documentation.mcp.dspace-dev.com/mcp"
+        },
+        "ados-mcp": {
+            "url": "https://mcp.dev.azure.com/dSPACEGroup",
+            "type": "http",
+            "headers": {
+                "X-MCP-Readonly": "true"
+            }
+        }
     }
-  }
 }

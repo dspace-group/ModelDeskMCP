@@ -440,6 +440,12 @@ def test_road_crud_save_download_and_save_as_use_active_network(tmp_path) -> Non
     assert saved_as.ok
     assert road_network.save_as_call == (str(save_as_path.resolve()), False)
 
+    preview = gateway.remove_road(Selector.create("index", "0"), save=False, download=False, dry_run=True)
+
+    assert preview.ok
+    assert preview.to_dict()["data"]["details"]["dryRun"] == "true"
+    assert road_network.Roads.Count == 1
+
     removed = gateway.remove_road(Selector.create("index", "0"), save=False, download=False)
 
     assert removed.ok

@@ -111,14 +111,14 @@ class _FakeGateway:
     def set_scenario_road(self, road_name: str, save: bool, download: bool) -> ToolResult:
         return self._record("set_scenario_road", road_name, save, download)
 
-    def list_fellow_activities(self, fellow_selector: Selector) -> ToolResult:
-        return self._record("list_fellow_activities", fellow_selector)
+    def list_fellow_activities(self, fellow_selector: Selector, offset: int = 0) -> ToolResult:
+        return self._record("list_fellow_activities", fellow_selector, offset)
 
     def get_vehicle_object_type(self, fellow_selector: Selector, maneuver_index: int) -> ToolResult:
         return self._record("get_vehicle_object_type", fellow_selector, maneuver_index)
 
-    def list_vehicle_object_types(self, fellow_selector: Selector, maneuver_index: int) -> ToolResult:
-        return self._record("list_vehicle_object_types", fellow_selector, maneuver_index)
+    def list_vehicle_object_types(self, fellow_selector: Selector, maneuver_index: int, offset: int = 0) -> ToolResult:
+        return self._record("list_vehicle_object_types", fellow_selector, maneuver_index, offset)
 
     def set_vehicle_object_type(self, fellow_selector: Selector, maneuver_index: int, element_index: int, save: bool, download: bool) -> ToolResult:
         return self._record("set_vehicle_object_type", fellow_selector, maneuver_index, element_index, save, download)
@@ -144,6 +144,7 @@ def test_service_list_fellow_activities_passes_active_selector_for_ego() -> None
     assert name == "list_fellow_activities"
     selector: Selector = args[0]
     assert selector.by == SelectorKind.ACTIVE
+    assert args[1] == 0
 
 
 def test_service_list_fellow_activities_passes_index_selector_for_fellow() -> None:
@@ -157,6 +158,7 @@ def test_service_list_fellow_activities_passes_index_selector_for_fellow() -> No
     selector: Selector = args[0]
     assert selector.by == SelectorKind.INDEX
     assert selector.to_com_value() == 2
+    assert args[1] == 0
 
 
 def test_service_list_fellow_activities_rejects_invalid_selector() -> None:
@@ -229,6 +231,20 @@ def test_summarize_type_elements_truncates_at_max_items() -> None:
     assert result.count == 10
     assert len(result.items) == 3
     assert result.message is not None
+
+
+def test_summarize_type_elements_paginates_with_stable_indexes() -> None:
+    from modeldesk_mcp.com_bridge.gateway import _summarize_type_elements
+
+    elements = ["elem0", "elem1", "elem2"]
+    first_page = _summarize_type_elements("domain", elements, "type", 2)
+    second_page = _summarize_type_elements("domain", elements, "type", 2, first_page.next_offset or 0)
+
+    assert first_page.count == 3
+    assert tuple(item.index for item in first_page.items) == (0, 1)
+    assert first_page.next_offset == 2
+    assert tuple(item.index for item in second_page.items) == (2,)
+    assert second_page.next_offset is None
 
 
 # --- Fellow name-selector regression tests ---
@@ -339,6 +355,32 @@ def _gateway_for_application(application: Any) -> ModelDeskAutomationGateway:
     gateway._dispatcher = _InlineDispatcher()  # type: ignore[assignment]
     gateway._application = application
     return gateway
+
+
+def test_scenario_removal_dry_runs_resolve_targets_without_mutating_collections() -> None:
+    fellow = SimpleNamespace(Name="Truck1")
+    maneuver = SimpleNamespace(Name="Turn")
+    fellows = _FakeComCollection([fellow])
+    maneuvers = _FakeComCollection([maneuver])
+    scenario = SimpleNamespace(Fellows=fellows, Maneuvers=maneuvers)
+    application = SimpleNamespace(
+        ActiveProject=SimpleNamespace(ActiveExperiment=SimpleNamespace(TrafficScenario=scenario))
+    )
+    gateway = _gateway_for_application(application)
+
+    fellow_preview = gateway.remove_scenario_fellow(Selector.create("index", "0"), save=False, download=False, dry_run=True)
+    maneuver_preview = gateway.remove_scenario_maneuver(
+        Selector.active(),
+        Selector.create("index", "0"),
+        save=False,
+        download=False,
+        dry_run=True,
+    )
+
+    assert fellow_preview.to_dict()["data"]["details"]["dryRun"] == "true"
+    assert maneuver_preview.to_dict()["data"]["details"]["dryRun"] == "true"
+    assert fellows.items == [fellow]
+    assert maneuvers.items == [maneuver]
 
 
 class _FakeProfileValue:
