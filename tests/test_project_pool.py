@@ -71,6 +71,31 @@ def test_create_road_network_without_active_project_returns_structured_failure()
     assert result.error.error_type == "invalid_state"
 
 
+def test_close_project_dry_run_does_not_close_project() -> None:
+    class Project:
+        Name = "Project A"
+
+        def __init__(self) -> None:
+            self.closed = False
+
+        def Close(self, save: bool) -> None:
+            self.closed = True
+
+    project = Project()
+    gateway = object.__new__(ModelDeskAutomationGateway)
+    gateway._dispatcher = _InlineDispatcher()  # type: ignore[attr-defined]
+    gateway._options = ComGatewayOptions()  # type: ignore[attr-defined]
+    gateway._session_id = "test-session"  # type: ignore[attr-defined]
+    gateway._application = SimpleNamespace(ActiveProject=project)  # type: ignore[attr-defined]
+
+    result = gateway.close_project(save=False, dry_run=True)
+
+    assert result.ok
+    assert result.to_dict()["data"]["details"]["dryRun"] == "true"
+    assert result.to_dict()["data"]["details"]["unsavedChanges"] == "unknown"
+    assert not project.closed
+
+
 def test_gateway_reacquires_active_project_on_each_operation() -> None:
     class MutableApplication:
         Version = "fake"

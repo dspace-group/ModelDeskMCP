@@ -106,7 +106,7 @@ class ModelDeskAutomationGateway:
             return ""
         return s
 
-    def remove_traffic_object(self, selector: Selector) -> ToolResult:
+    def remove_traffic_object(self, selector: Selector, dry_run: bool = False) -> ToolResult:
         """Remove a traffic object from the Traffic Object Manager by selector (index, name, id, ...)."""
         if selector.by == SelectorKind.ACTIVE:
             return self._validation_failure("modeldesk_remove_traffic_object", "Selector must not use active.")
@@ -116,6 +116,11 @@ class ModelDeskAutomationGateway:
             traffic_objects = _get_first_available_property(manager, "TrafficObjects", "Objects")
             obj = com.resolve_item(traffic_objects, selector)
             object_id = com.get_first_string_property(obj, "ObjectID", "Name", "CompleteName")
+            if dry_run:
+                return _dry_run_preview(
+                    "modeldesk_remove_traffic_object",
+                    {"objectId": object_id, "selectorKind": selector.by.value, "selectorValue": selector.value},
+                )
             result = com.invoke_method(manager, "RemoveTrafficObject", object_id)
             if isinstance(result, bool) and not result:
                 raise RuntimeError("Traffic object removal returned false.")
@@ -137,7 +142,7 @@ class ModelDeskAutomationGateway:
 
         return self._execute_com("modeldesk_add_traffic_object_folder", operation)
 
-    def remove_traffic_object_folder(self, selector: Selector) -> ToolResult:
+    def remove_traffic_object_folder(self, selector: Selector, dry_run: bool = False) -> ToolResult:
         """Remove a folder from the Traffic Object Manager by selector (name, id, ...)."""
         if selector.by == SelectorKind.ACTIVE:
             return self._validation_failure("modeldesk_remove_traffic_object_folder", "Selector must not use active.")
@@ -147,6 +152,11 @@ class ModelDeskAutomationGateway:
             folders = _get_required_property(manager, "Folders")
             folder = com.resolve_item(folders, selector)
             folder_name = com.get_first_string_property(folder, "Name", "CompleteName")
+            if dry_run:
+                return _dry_run_preview(
+                    "modeldesk_remove_traffic_object_folder",
+                    {"folderName": folder_name, "selectorKind": selector.by.value, "selectorValue": selector.value},
+                )
             result = com.invoke_method(manager, "RemoveFolder", folder_name)
             if isinstance(result, bool) and not result:
                 raise RuntimeError("Traffic object folder removal returned false.")
@@ -225,36 +235,47 @@ class ModelDeskAutomationGateway:
             return self._validation_failure("modeldesk_create_traffic_scenario", public_error_message(exception))
         return self._execute_com("modeldesk_create_traffic_scenario", lambda application: self._create_project_pool_file_core(application, request))
 
-    def list_environment_pool_items(self, group: str | None, recursive: bool) -> ToolResult:
+    def list_environment_pool_items(self, group: str | None, recursive: bool, offset: int = 0) -> ToolResult:
         """List files in one active-project Environment Pool group."""
 
         try:
             request = EnvironmentPoolGroupRequest.create(group, recursive)
         except ValueError as exception:
             return self._validation_failure("modeldesk_list_environment_pool_items", public_error_message(exception))
-        return self._execute_com("modeldesk_list_environment_pool_items", lambda application: self._list_environment_pool_items_core(application, request))
+        return self._execute_com("modeldesk_list_environment_pool_items", lambda application: self._list_environment_pool_items_core(application, request, offset))
 
     def save_project(self) -> ToolResult:
         """Save the active project."""
 
         return self._execute_com("modeldesk_save_project", lambda application: self._invoke_project_method(application, "Save", "Active project saved."))
 
-    def close_project(self, save: bool) -> ToolResult:
+    def close_project(self, save: bool, dry_run: bool = False) -> ToolResult:
         """Close the active project."""
 
         def operation(application: Any) -> OperationInfo:
             project = _get_active_project(application)
+            if dry_run:
+                details = {
+                    "projectName": com.get_first_string_property(project, "Name", "ProjectName"),
+                    "unsavedChanges": "unknown",
+                }
+                return _dry_run_preview(
+                    "modeldesk_close_project",
+                    details,
+                    save=save,
+                    message="Dry-run preview; project was not closed and unsaved changes were not inspected.",
+                )
             com.invoke_method(project, "Close", save)
             return OperationInfo("modeldesk_close_project", True, "Active project closed.")
 
         return self._execute_com("modeldesk_close_project", operation)
 
-    def list_experiments(self) -> ToolResult:
+    def list_experiments(self, offset: int = 0) -> ToolResult:
         """List experiments in the active project."""
 
         return self._execute_com(
             "modeldesk_list_experiments",
-            lambda application: self._create_collection_summary("experiments", _get_required_property(_get_active_project(application), "Experiments"), "experiment"),
+            lambda application: self._create_collection_summary("experiments", _get_required_property(_get_active_project(application), "Experiments"), "experiment", offset),
         )
 
     def activate_experiment(self, selector: Selector, save_active: bool) -> ToolResult:
@@ -268,12 +289,12 @@ class ModelDeskAutomationGateway:
 
         return self._execute_com("modeldesk_activate_experiment", operation)
 
-    def list_parameter_sets(self) -> ToolResult:
+    def list_parameter_sets(self, offset: int = 0) -> ToolResult:
         """List parameter sets in the active experiment."""
 
         return self._execute_com(
             "modeldesk_list_parameter_sets",
-            lambda application: self._create_collection_summary("parameterization.parameterSets", _get_required_property(_get_active_experiment(application), "ParameterSets"), "parameterSet"),
+            lambda application: self._create_collection_summary("parameterization.parameterSets", _get_required_property(_get_active_experiment(application), "ParameterSets"), "parameterSet", offset),
         )
 
     def activate_parameter_set(self, selector: Selector, save_active: bool) -> ToolResult:
@@ -381,12 +402,12 @@ class ModelDeskAutomationGateway:
 
         return self._execute_com("modeldesk_activate_road", operation)
 
-    def list_roads(self) -> ToolResult:
+    def list_roads(self, offset: int = 0) -> ToolResult:
         """List roads in the active road network."""
 
         return self._execute_com(
             "modeldesk_list_roads",
-            lambda application: self._create_collection_summary("roads.roads", _get_required_property(_get_active_road_network(application), "Roads"), "road"),
+            lambda application: self._create_collection_summary("roads.roads", _get_required_property(_get_active_road_network(application), "Roads"), "road", offset),
         )
 
     def save_road_network_as(self, file_name: str, overwrite_existing: bool) -> ToolResult:
@@ -422,10 +443,10 @@ class ModelDeskAutomationGateway:
             return self._validation_failure("modeldesk_update_road", "Road name must not be empty.")
         return self._execute_com("modeldesk_update_road", lambda application: self._update_road_core(application, selector, normalized_name, save, download))
 
-    def remove_road(self, selector: Selector, save: bool, download: bool) -> ToolResult:
+    def remove_road(self, selector: Selector, save: bool, download: bool, dry_run: bool = False) -> ToolResult:
         """Remove a road from the active road network."""
 
-        return self._execute_com("modeldesk_remove_road", lambda application: self._remove_road_core(application, selector, save, download))
+        return self._execute_com("modeldesk_remove_road", lambda application: self._remove_road_core(application, selector, save, download, dry_run))
 
     def add_road_segment(self, selector: Selector, segment_type: str | None, properties_json: str | None, insert_after_segment_index: int, save: bool, download: bool) -> ToolResult:
         """Add a typed road segment."""
@@ -447,12 +468,12 @@ class ModelDeskAutomationGateway:
             return self._validation_failure("modeldesk_update_road_segment", public_error_message(exception))
         return self._execute_com("modeldesk_update_road_segment", lambda application: self._update_road_segment_core(application, selector, segment_index, request))
 
-    def remove_road_segment(self, selector: Selector, segment_index: int, save: bool, download: bool) -> ToolResult:
+    def remove_road_segment(self, selector: Selector, segment_index: int, save: bool, download: bool, dry_run: bool = False) -> ToolResult:
         """Remove a selected road segment."""
 
         if segment_index < 0:
             return self._validation_failure("modeldesk_remove_road_segment", "Segment index must be a non-negative integer.")
-        return self._execute_com("modeldesk_remove_road_segment", lambda application: self._remove_road_segment_core(application, selector, segment_index, save, download))
+        return self._execute_com("modeldesk_remove_road_segment", lambda application: self._remove_road_segment_core(application, selector, segment_index, save, download, dry_run))
 
     def configure_road_lanes(self, selector: Selector, lane_section_index: int, left_lane_count: int, right_lane_count: int, lane_width: float, lane_section_length: float, save: bool, download: bool) -> ToolResult:
         """Configure lane counts and lane width for a selected lane section."""
@@ -491,12 +512,12 @@ class ModelDeskAutomationGateway:
             return self._validation_failure("modeldesk_update_road_object", public_error_message(exception))
         return self._execute_com("modeldesk_update_road_object", lambda application: self._update_road_object_core(application, selector, object_index, properties, save, download))
 
-    def remove_road_object(self, selector: Selector, object_index: int, save: bool, download: bool) -> ToolResult:
+    def remove_road_object(self, selector: Selector, object_index: int, save: bool, download: bool, dry_run: bool = False) -> ToolResult:
         """Remove a road-local traffic object."""
 
         if object_index < 0:
             return self._validation_failure("modeldesk_remove_road_object", "Road object index must be a non-negative integer.")
-        return self._execute_com("modeldesk_remove_road_object", lambda application: self._remove_road_object_core(application, selector, object_index, save, download))
+        return self._execute_com("modeldesk_remove_road_object", lambda application: self._remove_road_object_core(application, selector, object_index, save, download, dry_run))
 
     def connect_roads(self, source_selector: Selector, source_point: str | None, target_selector: Selector, target_point: str | None, mode: str | None, save: bool, download: bool) -> ToolResult:
         """Connect two road connection points."""
@@ -509,14 +530,14 @@ class ModelDeskAutomationGateway:
             return self._validation_failure("modeldesk_connect_roads", public_error_message(exception))
         return self._execute_com("modeldesk_connect_roads", lambda application: self._connect_roads_core(application, source_selector, parsed_source_point, target_selector, parsed_target_point, parsed_mode, save, download))
 
-    def disconnect_road(self, selector: Selector, connection_point: str | None, save: bool, download: bool) -> ToolResult:
+    def disconnect_road(self, selector: Selector, connection_point: str | None, save: bool, download: bool, dry_run: bool = False) -> ToolResult:
         """Disconnect a selected road connection point."""
 
         try:
             parsed_connection_point = _parse_connection_point(connection_point, RoadConnectionPointKind.END)
         except ValueError as exception:
             return self._validation_failure("modeldesk_disconnect_road", public_error_message(exception))
-        return self._execute_com("modeldesk_disconnect_road", lambda application: self._disconnect_road_core(application, selector, parsed_connection_point, save, download))
+        return self._execute_com("modeldesk_disconnect_road", lambda application: self._disconnect_road_core(application, selector, parsed_connection_point, save, download, dry_run))
 
     def create_basic_road(self, name: str | None, length: float, left_lane_count: int, right_lane_count: int, lane_width: float, traffic_objects_json: str | None, save: bool, download: bool) -> ToolResult:
         """Create a simple straight road in the active road network."""
@@ -534,15 +555,15 @@ class ModelDeskAutomationGateway:
             return self._validation_failure("modeldesk_activate_scenario", "Scenario name must not be empty.")
         return self._execute_com("modeldesk_activate_scenario", lambda application: self._activate_experiment_named_method(application, "ActivateTrafficScenario", scenario_name, "modeldesk_activate_scenario", "Traffic scenario activated."))
 
-    def list_scenario_fellows(self) -> ToolResult:
+    def list_scenario_fellows(self, offset: int = 0) -> ToolResult:
         """List fellows or traffic participants in the active scenario."""
 
-        return self._execute_com("modeldesk_list_scenario_fellows", lambda application: self._create_collection_summary("scenarios.fellows", _get_scenario_fellows_collection(application), "fellow"))
+        return self._execute_com("modeldesk_list_scenario_fellows", lambda application: self._create_collection_summary("scenarios.fellows", _get_scenario_fellows_collection(application), "fellow", offset))
 
-    def list_scenario_maneuvers(self) -> ToolResult:
+    def list_scenario_maneuvers(self, offset: int = 0) -> ToolResult:
         """List maneuvers in the active traffic scenario."""
 
-        return self._execute_com("modeldesk_list_scenario_maneuvers", lambda application: self._create_first_available_collection_summary("scenarios.maneuvers", _get_active_traffic_scenario(application), "maneuver", "Maneuvers", "Maneuver"))
+        return self._execute_com("modeldesk_list_scenario_maneuvers", lambda application: self._create_first_available_collection_summary("scenarios.maneuvers", _get_active_traffic_scenario(application), "maneuver", "Maneuvers", "Maneuver", offset=offset))
 
     def add_scenario_fellow(self, name: str | None, properties_json: str | None, traffic_object_selector: Selector | None, traffic_object_catalog_path: str | None, traffic_driver_reference: str | None, save: bool, download: bool) -> ToolResult:
         """Add a fellow or traffic participant to the active scenario."""
@@ -560,7 +581,7 @@ class ModelDeskAutomationGateway:
             return self._validation_failure("modeldesk_update_scenario_fellow", "Traffic object selector must not use active.")
         return self._execute_com("modeldesk_update_scenario_fellow", lambda application: self._add_scenario_fellow_core(application, fellow_selector, name, properties_json, traffic_object_selector, traffic_object_catalog_path, traffic_driver_reference, save, download))
 
-    def remove_scenario_fellow(self, fellow_selector: Selector, save: bool, download: bool) -> ToolResult:
+    def remove_scenario_fellow(self, fellow_selector: Selector, save: bool, download: bool, dry_run: bool = False) -> ToolResult:
         """Remove a fellow or traffic participant."""
 
         if fellow_selector.by == SelectorKind.ACTIVE:
@@ -569,6 +590,14 @@ class ModelDeskAutomationGateway:
         def operation(application: Any) -> OperationInfo:
             fellows = _get_scenario_fellows_collection(application)
             index_selector = _fellow_selector_to_index_selector(fellows, fellow_selector)
+            if dry_run:
+                fellow = com.resolve_item(fellows, index_selector)
+                details = {
+                    "fellowName": com.get_first_string_property(fellow, "Name", "CompleteName"),
+                    "fellowSelectorKind": fellow_selector.by.value,
+                    "fellowSelectorValue": fellow_selector.value,
+                }
+                return _dry_run_preview("modeldesk_remove_scenario_fellow", details, save, download)
             _remove_collection_item(fellows, index_selector, "fellow")
             details = {"fellowSelectorKind": fellow_selector.by.value, "fellowSelectorValue": fellow_selector.value}
             _apply_scenario_save_download(application, save, download, details)
@@ -588,7 +617,7 @@ class ModelDeskAutomationGateway:
             return self._validation_failure("modeldesk_update_scenario_maneuver", "Maneuver selector must not use active.")
         return self._execute_com("modeldesk_update_scenario_maneuver", lambda application: self._add_or_update_scenario_maneuver_core(application, fellow_selector, maneuver_selector, properties_json, save, download, "modeldesk_update_scenario_maneuver", False))
 
-    def remove_scenario_maneuver(self, fellow_selector: Selector, maneuver_selector: Selector, save: bool, download: bool) -> ToolResult:
+    def remove_scenario_maneuver(self, fellow_selector: Selector, maneuver_selector: Selector, save: bool, download: bool, dry_run: bool = False) -> ToolResult:
         """Remove a maneuver from the active scenario or selected fellow."""
 
         if maneuver_selector.by == SelectorKind.ACTIVE:
@@ -596,6 +625,16 @@ class ModelDeskAutomationGateway:
 
         def operation(application: Any) -> OperationInfo:
             maneuvers = _get_scenario_maneuvers_collection(application, fellow_selector)
+            if dry_run:
+                maneuver = com.resolve_item(maneuvers, maneuver_selector)
+                details = {
+                    "fellowSelectorKind": fellow_selector.by.value,
+                    "fellowSelectorValue": fellow_selector.value,
+                    "maneuverSelectorKind": maneuver_selector.by.value,
+                    "maneuverSelectorValue": maneuver_selector.value,
+                    "maneuverName": com.get_first_string_property(maneuver, "Name", "CompleteName"),
+                }
+                return _dry_run_preview("modeldesk_remove_scenario_maneuver", details, save, download)
             _remove_collection_item(maneuvers, maneuver_selector, "maneuver")
             details = {
                 "fellowSelectorKind": fellow_selector.by.value,
@@ -829,13 +868,13 @@ class ModelDeskAutomationGateway:
 
         return self._execute_com("modeldesk_set_scenario_road", operation)
 
-    def list_fellow_activities(self, fellow_selector: Selector) -> ToolResult:
+    def list_fellow_activities(self, fellow_selector: Selector, offset: int = 0) -> ToolResult:
         """List maneuvers/activities for a specific fellow or for the ego vehicle."""
 
         def operation(application: Any) -> DomainSummary:
             maneuvers = _get_scenario_maneuvers_collection(application, fellow_selector)
             label = "scenarios.egoActivities" if fellow_selector.by == SelectorKind.ACTIVE else f"scenarios.fellowActivities[{fellow_selector.by.value}={fellow_selector.value}]"
-            return self._create_collection_summary(label, maneuvers, "activity")
+            return self._create_collection_summary(label, maneuvers, "activity", offset)
 
         return self._execute_com("modeldesk_list_fellow_activities", operation)
 
@@ -853,13 +892,13 @@ class ModelDeskAutomationGateway:
 
         return self._execute_com("modeldesk_get_vehicle_object_type", operation)
 
-    def list_vehicle_object_types(self, fellow_selector: Selector, maneuver_index: int) -> ToolResult:
+    def list_vehicle_object_types(self, fellow_selector: Selector, maneuver_index: int, offset: int = 0) -> ToolResult:
         """List all available 3D object types for a fellow or ego maneuver."""
 
         def operation(application: Any) -> DomainSummary:
             type_manager, domain = _get_vehicle_object_type_manager(application, fellow_selector, maneuver_index)
             elements = _available_type_elements(type_manager)
-            return _summarize_type_elements(f"scenarios.objectTypes.{domain}", elements, "object type", self._options.max_collection_items)
+            return _summarize_type_elements(f"scenarios.objectTypes.{domain}", elements, "object type", self._options.max_collection_items, offset)
 
         return self._execute_com("modeldesk_list_vehicle_object_types", operation)
 
@@ -885,15 +924,15 @@ class ModelDeskAutomationGateway:
 
         return self._execute_com("modeldesk_set_vehicle_object_type", operation)
 
-    def list_traffic_objects(self) -> ToolResult:
+    def list_traffic_objects(self, offset: int = 0) -> ToolResult:
         """List reusable traffic objects from the active project."""
 
-        return self._execute_com("modeldesk_list_traffic_objects", lambda application: self._create_first_available_collection_summary("trafficObjects.objects", _get_traffic_object_manager(application), "traffic object", "TrafficObjects", "Objects"))
+        return self._execute_com("modeldesk_list_traffic_objects", lambda application: self._create_first_available_collection_summary("trafficObjects.objects", _get_traffic_object_manager(application), "traffic object", "TrafficObjects", "Objects", offset=offset))
 
-    def list_traffic_object_folders(self) -> ToolResult:
+    def list_traffic_object_folders(self, offset: int = 0) -> ToolResult:
         """List traffic-object catalog folders."""
 
-        return self._execute_com("modeldesk_list_traffic_object_folders", lambda application: self._create_collection_summary("trafficObjects.folders", _get_required_property(_get_traffic_object_manager(application), "Folders"), "traffic object folder"))
+        return self._execute_com("modeldesk_list_traffic_object_folders", lambda application: self._create_collection_summary("trafficObjects.folders", _get_required_property(_get_traffic_object_manager(application), "Folders"), "traffic object folder", offset))
 
     def validate_traffic_object_reference(self, selector: Selector) -> ToolResult:
         """Validate a traffic-object catalog reference."""
@@ -920,12 +959,12 @@ class ModelDeskAutomationGateway:
             return self._validation_failure("modeldesk_activate_test", "Test name must not be empty.")
         return self._execute_com("modeldesk_activate_test", lambda application: self._activate_experiment_named_method(application, "ActivateTest", test_name, "modeldesk_activate_test", "Test activated."))
 
-    def list_logical_test_cases(self) -> ToolResult:
+    def list_logical_test_cases(self, offset: int = 0) -> ToolResult:
         """List logical test cases."""
 
-        return self._execute_com("modeldesk_list_logical_test_cases", lambda application: self._create_collection_summary("testing.logicalTestCases", _get_required_property(_get_active_test(application), "LogicalTestCases"), "logical test case"))
+        return self._execute_com("modeldesk_list_logical_test_cases", lambda application: self._create_collection_summary("testing.logicalTestCases", _get_required_property(_get_active_test(application), "LogicalTestCases"), "logical test case", offset))
 
-    def list_concrete_test_cases(self, logical_test_case_selector: Selector) -> ToolResult:
+    def list_concrete_test_cases(self, logical_test_case_selector: Selector, offset: int = 0) -> ToolResult:
         """List concrete test cases for one logical test case of the active test configuration."""
 
         if logical_test_case_selector.by == SelectorKind.ACTIVE:
@@ -937,12 +976,12 @@ class ModelDeskAutomationGateway:
             logical_test_cases = _get_required_property(_get_active_test(application), "LogicalTestCases")
             logical_test_case = com.resolve_item(logical_test_cases, logical_test_case_selector)
             concrete_test_cases = _get_required_property(logical_test_case, "ConcreteTestCases")
-            summary = self._create_collection_summary("testing.concreteTestCases", concrete_test_cases, "concrete test case")
+            summary = self._create_collection_summary("testing.concreteTestCases", concrete_test_cases, "concrete test case", offset)
             properties = dict(summary.properties)
             properties["logicalTestCaseSelectorKind"] = logical_test_case_selector.by.value
             properties["logicalTestCaseSelectorValue"] = logical_test_case_selector.value
             properties["logicalTestCaseName"] = com.get_string_property(logical_test_case, "Name")
-            return DomainSummary(summary.domain, summary.available, summary.count, summary.items, properties, summary.message)
+            return DomainSummary(summary.domain, summary.available, summary.count, summary.items, properties, summary.message, summary.next_offset)
 
         return self._execute_com("modeldesk_list_concrete_test_cases", operation)
 
@@ -956,7 +995,7 @@ class ModelDeskAutomationGateway:
 
         return self._execute_com("modeldesk_activate_plotting", operation)
 
-    def list_plot_captures(self) -> ToolResult:
+    def list_plot_captures(self, offset: int = 0) -> ToolResult:
         """List captures in the active plotting configuration."""
 
         return self._execute_com(
@@ -967,10 +1006,11 @@ class ModelDeskAutomationGateway:
                 "capture",
                 "OpenCaptures",
                 "AvailableElements",
+                offset=offset,
             ),
         )
 
-    def list_plot_layouts(self) -> ToolResult:
+    def list_plot_layouts(self, offset: int = 0) -> ToolResult:
         """List plot layouts in the active plotting configuration."""
 
         return self._execute_com(
@@ -981,6 +1021,7 @@ class ModelDeskAutomationGateway:
                 "plot layout",
                 "ActiveLayouts",
                 "AvailableElements",
+                offset=offset,
             ),
         )
 
@@ -1166,7 +1207,7 @@ class ModelDeskAutomationGateway:
         message = f"Created project pool file '{request.name}{request.expected_extension()}' with CreateFile type {request.to_com_type()} ({request.file_type.display_name})."
         return ProjectPoolFileCreationInfo(request.file_type.display_name, request.to_com_type(), request.name, request.expected_extension(), request.overwrite_existing, created_name, created_path, created_type_name, message)
 
-    def _list_environment_pool_items_core(self, application: Any, request: EnvironmentPoolGroupRequest) -> DomainSummary:
+    def _list_environment_pool_items_core(self, application: Any, request: EnvironmentPoolGroupRequest, offset: int = 0) -> DomainSummary:
         project = _get_active_project(application)
         working_root = com.get_string_property(project, "WorkingRoot")
         if working_root is None or working_root.strip() == "":
@@ -1182,18 +1223,20 @@ class ModelDeskAutomationGateway:
             "extension": request.file_extension(),
             "recursive": str(request.recursive),
             "maxItems": str(max_items),
+            "offset": str(offset),
             "environmentRootExists": str(environment_root.exists()),
             "groupDirectoryExists": str(group_path.exists()),
         }
         if not group_path.exists():
             message = f"Environment Pool group directory '{group_path}' does not exist."
             return DomainSummary(request.domain_name(), False, 0, (), properties, message)
-        file_paths, truncated = _enumerate_environment_pool_files(group_path, request, max_items)
-        items = tuple(ItemSummary(index, _environment_pool_item_name(group_path, path), request.item_kind(), str(path)) for index, path in enumerate(file_paths))
-        properties["matchedItemCount"] = str(len(items))
-        properties["truncated"] = str(truncated)
-        message = f"Result was truncated to {max_items} items." if truncated else None
-        return DomainSummary(request.domain_name(), True, len(items), items, properties, message)
+        file_paths, total_count, next_offset = _enumerate_environment_pool_files(group_path, request, max_items, offset)
+        items = tuple(ItemSummary(index, _environment_pool_item_name(group_path, path), request.item_kind(), str(path)) for index, path in enumerate(file_paths, start=offset))
+        properties["matchedItemCount"] = str(total_count)
+        properties["pageItemCount"] = str(len(items))
+        properties["truncated"] = str(next_offset is not None)
+        message = f"More items available; request offset {next_offset}." if next_offset is not None else None
+        return DomainSummary(request.domain_name(), True, total_count, items, properties, message, next_offset)
 
     def _invoke_project_method(self, application: Any, method_name: str, message: str) -> OperationInfo:
         project = _get_active_project(application)
@@ -1305,11 +1348,14 @@ class ModelDeskAutomationGateway:
         _apply_road_network_save_download(road_network, save, download, details)
         return OperationInfo("modeldesk_update_road", True, "Road updated.", details)
 
-    def _remove_road_core(self, application: Any, selector: Selector, save: bool, download: bool) -> OperationInfo:
+    def _remove_road_core(self, application: Any, selector: Selector, save: bool, download: bool, dry_run: bool = False) -> OperationInfo:
         road_network = _get_active_road_network(application)
         roads = _get_required_property(road_network, "Roads")
         road = _resolve_road(road_network, selector)
         road_name = _read_road_name(road)
+        if dry_run:
+            details = {"roadName": road_name, "wouldRemainRoadCount": str(max(0, com.get_count(roads) - 1))}
+            return _dry_run_preview("modeldesk_remove_road", details, save, download)
         result = com.invoke_method(roads, "Remove", road)
         if isinstance(result, bool) and not result:
             raise RuntimeError("Road removal returned false.")
@@ -1341,13 +1387,21 @@ class ModelDeskAutomationGateway:
         _apply_road_network_save_download(road_network, request.save, request.download, details)
         return OperationInfo("modeldesk_update_road_segment", True, "Road segment updated.", details)
 
-    def _remove_road_segment_core(self, application: Any, selector: Selector, segment_index: int, save: bool, download: bool) -> OperationInfo:
+    def _remove_road_segment_core(self, application: Any, selector: Selector, segment_index: int, save: bool, download: bool, dry_run: bool = False) -> OperationInfo:
         road_network = _get_active_road_network(application)
         road = _resolve_road(road_network, selector)
         segments = _get_required_property(road, "Segments")
         active_segment = _invoke_required_item(segments, segment_index, "segment")
         typed_segment = _get_active_segment_element(active_segment)
         segment_name = com.get_string_property(typed_segment, "Name") or f"Segment {segment_index}"
+        if dry_run:
+            details = {
+                "roadName": _read_road_name(road),
+                "segmentName": segment_name,
+                "segmentIndex": str(segment_index),
+                "wouldRemainSegmentCount": str(max(0, com.get_count(segments) - 1)),
+            }
+            return _dry_run_preview("modeldesk_remove_road_segment", details, save, download)
         result = com.invoke_method(segments, "Remove", segment_index)
         if isinstance(result, bool) and not result:
             raise RuntimeError("Segment removal returned false.")
@@ -1386,12 +1440,20 @@ class ModelDeskAutomationGateway:
         _apply_road_network_save_download(road_network, save, download, details)
         return OperationInfo("modeldesk_update_road_object", True, "Road traffic object updated.", details)
 
-    def _remove_road_object_core(self, application: Any, selector: Selector, object_index: int, save: bool, download: bool) -> OperationInfo:
+    def _remove_road_object_core(self, application: Any, selector: Selector, object_index: int, save: bool, download: bool, dry_run: bool = False) -> OperationInfo:
         road_network = _get_active_road_network(application)
         road = _resolve_road(road_network, selector)
         road_objects = _get_required_property(road, "Objects")
         road_object = _invoke_required_item(road_objects, object_index, "road object")
         object_name = com.get_string_property(road_object, "Name") or f"Road object {object_index}"
+        if dry_run:
+            details = {
+                "roadName": _read_road_name(road),
+                "objectName": object_name,
+                "objectIndex": str(object_index),
+                "wouldRemainObjectCount": str(max(0, com.get_count(road_objects) - 1)),
+            }
+            return _dry_run_preview("modeldesk_remove_road_object", details, save, download)
         result = com.invoke_method(road_objects, "Remove", road_object)
         if isinstance(result, bool) and not result:
             raise RuntimeError("Road object removal returned false.")
@@ -1413,12 +1475,14 @@ class ModelDeskAutomationGateway:
         _apply_road_network_save_download(road_network, save, download, details)
         return OperationInfo("modeldesk_connect_roads", True, "Road connection created.", details)
 
-    def _disconnect_road_core(self, application: Any, selector: Selector, connection_point: RoadConnectionPointKind, save: bool, download: bool) -> OperationInfo:
+    def _disconnect_road_core(self, application: Any, selector: Selector, connection_point: RoadConnectionPointKind, save: bool, download: bool, dry_run: bool = False) -> OperationInfo:
         road_network = _get_active_road_network(application)
         road = _resolve_road(road_network, selector)
         road_connection_point = _resolve_road_connection_point(road, connection_point)
-        com.invoke_method(road_connection_point, "Disconnect")
         details = {"roadName": _read_road_name(road), "connectionPoint": connection_point.display_name}
+        if dry_run:
+            return _dry_run_preview("modeldesk_disconnect_road", details, save, download)
+        com.invoke_method(road_connection_point, "Disconnect")
         _apply_road_network_save_download(road_network, save, download, details)
         return OperationInfo("modeldesk_disconnect_road", True, "Road connection point disconnected.", details)
 
@@ -1523,13 +1587,13 @@ class ModelDeskAutomationGateway:
 
         return self._execute_com(operation_name, operation)
 
-    def _create_collection_summary(self, domain: str, collection: Any, item_kind: str) -> DomainSummary:
-        snapshot = com.snapshot_collection(collection, item_kind, self._options.max_collection_items)
+    def _create_collection_summary(self, domain: str, collection: Any, item_kind: str, offset: int = 0) -> DomainSummary:
+        snapshot = com.snapshot_collection(collection, item_kind, self._options.max_collection_items, offset)
         properties = com.read_properties(collection, "Name", "TypeName")
         message = f"Result was truncated to {self._options.max_collection_items} items." if snapshot.is_truncated else None
-        return DomainSummary(domain, True, snapshot.count, snapshot.items, properties, message)
+        return DomainSummary(domain, True, snapshot.count, snapshot.items, properties, message, snapshot.next_offset)
 
-    def _create_first_available_collection_summary(self, domain: str, instance: Any, item_kind: str, *property_candidates: str) -> DomainSummary:
+    def _create_first_available_collection_summary(self, domain: str, instance: Any, item_kind: str, *property_candidates: str, offset: int = 0) -> DomainSummary:
         properties: dict[str, str | None] = {}
         for property_name in property_candidates:
             has_collection, collection = com.try_get_property(instance, property_name)
@@ -1537,10 +1601,10 @@ class ModelDeskAutomationGateway:
                 properties[f"collection.{property_name}.available"] = "False"
                 continue
             try:
-                summary = self._create_collection_summary(domain, collection, item_kind)
+                summary = self._create_collection_summary(domain, collection, item_kind, offset)
                 merged = dict(summary.properties)
                 merged["collection.selected"] = property_name
-                return DomainSummary(summary.domain, summary.available, summary.count, summary.items, merged, summary.message)
+                return DomainSummary(summary.domain, summary.available, summary.count, summary.items, merged, summary.message, summary.next_offset)
             except Exception as exception:  # noqa: BLE001 - records per-candidate late-bound failures.
                 properties[f"collection.{property_name}.error"] = public_error_message(exception)
         message = f"None of the expected COM collection properties could be summarized: {', '.join(property_candidates)}."
@@ -2003,19 +2067,30 @@ def _available_type_elements(type_manager: Any) -> list[Any]:
     return [_invoke_required_item(available, i, "type element") for i in range(count)]
 
 
-def _summarize_type_elements(domain: str, elements: list[Any], item_kind: str, max_items: int) -> DomainSummary:
+def _summarize_type_elements(
+    domain: str,
+    elements: list[Any],
+    item_kind: str,
+    max_items: int,
+    offset: int = 0,
+) -> DomainSummary:
     """Build a DomainSummary from a Python list of type elements."""
 
-    truncated = len(elements) > max_items
-    bounded = elements[:max_items]
+    if max_items <= 0:
+        raise ValueError("Maximum item count must be greater than zero.")
+    if offset < 0:
+        raise ValueError("Collection offset must not be negative.")
+    end_offset = min(len(elements), offset + max_items)
+    bounded = elements[offset:end_offset]
     items: list[ItemSummary] = []
-    for index, element in enumerate(bounded):
+    for index, element in enumerate(bounded, start=offset):
         name = com.read_display_name(element, item_kind, index) if element is not None else f"{item_kind} {index}"
         path = com.get_first_string_property(element, "Path", "CompleteName", "FileName") if element is not None else None
         kind = com.get_first_string_property(element, "TypeName", "Kind", "ObjectType") if element is not None else None
         items.append(ItemSummary(index, name, kind, path))
-    message = f"Result was truncated to {max_items} items." if truncated else None
-    return DomainSummary(domain, True, len(elements), tuple(items), {}, message)
+    next_offset = end_offset if end_offset < len(elements) else None
+    message = f"More items available; request offset {next_offset}." if next_offset is not None else None
+    return DomainSummary(domain, True, len(elements), tuple(items), {}, message, next_offset)
 
 
 def _apply_traffic_object_reference(application: Any, fellow: Any, traffic_object_selector: Selector | None, traffic_object_catalog_path: str | None) -> None:
@@ -2394,21 +2469,27 @@ def _is_finite(value: float) -> bool:
     return value == value and value not in (float("inf"), float("-inf"))
 
 
-def _enumerate_environment_pool_files(group_path: Path, request: EnvironmentPoolGroupRequest, max_items: int) -> tuple[tuple[Path, ...], bool]:
+def _enumerate_environment_pool_files(
+    group_path: Path,
+    request: EnvironmentPoolGroupRequest,
+    max_items: int,
+    offset: int = 0,
+) -> tuple[tuple[Path, ...], int, int | None]:
     if max_items <= 0:
         raise ValueError("Maximum item count must be greater than zero.")
+    if offset < 0:
+        raise ValueError("Collection offset must not be negative.")
     pattern = f"*{request.file_extension()}"
     iterator: Iterable[Path] = group_path.rglob(pattern) if request.recursive else group_path.glob(pattern)
     paths: list[Path] = []
-    truncated = False
     for path in iterator:
-        if len(paths) >= max_items:
-            truncated = True
-            break
         if path.is_file():
             paths.append(path)
     paths.sort(key=lambda value: str(value).lower())
-    return tuple(paths), truncated
+    end_offset = min(len(paths), offset + max_items)
+    page_paths = tuple(paths[offset:end_offset])
+    next_offset = end_offset if end_offset < len(paths) else None
+    return page_paths, len(paths), next_offset
 
 
 def _environment_pool_item_name(group_path: Path, file_path: Path) -> str:
@@ -2433,3 +2514,19 @@ def _classify_error(exception: Exception) -> str:
     if isinstance(exception, com.COM_ERROR_TYPES):
         return "com_error"
     return "unexpected"
+
+
+def _dry_run_preview(
+    operation_name: str,
+    details: dict[str, str | None],
+    save: bool | None = None,
+    download: bool | None = None,
+    message: str = "Dry-run preview; no changes were applied.",
+) -> OperationInfo:
+    preview_details = dict(details)
+    preview_details["dryRun"] = "true"
+    if save is not None:
+        preview_details["wouldSave"] = str(save).lower()
+    if download is not None:
+        preview_details["wouldDownload"] = str(download).lower()
+    return OperationInfo(operation_name, True, message, preview_details)

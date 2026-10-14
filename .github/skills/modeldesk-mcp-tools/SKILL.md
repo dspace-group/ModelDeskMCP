@@ -1,7 +1,6 @@
 ---
 name: modeldesk-mcp-tools
 description: Use when an agent operates the local ModelDesk MCP server to inspect context, plan workflows, author project assets, process experiments, run tests, or compare results with explicit user intent and structured recovery.
-version: 1.0.0
 ---
 
 # ModelDesk MCP Tools
@@ -25,6 +24,12 @@ Treat every selector as scope-sensitive and potentially stale. Discover the curr
 
 Keep save and download controls disabled when the operation exposes them unless the user explicitly asks to persist or transfer state. Group related edits, verify the completed batch, then save once when requested. Do not infer permission to save, download, execute, synchronize, or overwrite from a read-only request. Confirm the target experiment and parameter set before any persistence or download action.
 
+## Pagination and dry-run previews
+
+These tools accept a zero-based `offset` (default `0`): `modeldesk_list_environment_pool_items`, `modeldesk_list_experiments`, `modeldesk_list_parameter_sets`, `modeldesk_list_roads`, `modeldesk_list_scenario_fellows`, `modeldesk_list_scenario_maneuvers`, `modeldesk_list_fellow_activities`, `modeldesk_list_vehicle_object_types`, `modeldesk_list_traffic_objects`, `modeldesk_list_traffic_object_folders`, `modeldesk_list_logical_test_cases`, `modeldesk_list_concrete_test_cases`, `modeldesk_list_plot_captures`, and `modeldesk_list_plot_layouts`. Page size is bounded by `MODELDESK_MCP_MAX_COLLECTION_ITEMS` (default `500`). `data.count` is the total number of items; continue at `data.nextOffset` until it is `null`. Do not treat one page as a complete collection.
+
+`dryRun=true` previews the target without applying a change for project close, road/segment/object removal, road disconnection, scenario fellow/maneuver removal, and traffic-object/folder removal. It defaults to `false`; a preview returns `data.details.dryRun=true` and does not save or download. A preview is not authorization to perform the subsequent mutation. Project-close preview cannot determine whether unsaved changes exist and reports `unsavedChanges="unknown"`.
+
 ## Read-only and mutating boundaries
 
 Read-only operations include status, capabilities, summaries, lists, current-value reads, reference validation, workflow planning, and comparison preparation. Context activation changes the active scope and should be treated as a state change even when it does not edit a file. Creation, updates, removals, project/experiment persistence, downloads, processing, test execution, maneuver start/stop/reset, and synchronization are mutating or externally visible actions; perform them only when the request authorizes that action and the preflight checks pass.
@@ -38,7 +43,7 @@ Use the dedicated type-specific creator when one exists; use the generic project
 | `0` | Road Network | `.rd` |
 | `1` | Traffic Scenario | `.xml` |
 | `2` | Testing Test | `.tst` |
-| `3` | Simulation Configuration | `.xml` |
+| `3` | `LayoutConfiguration` (simulation configuration) | `.xml` |
 | `4` | Traffic Driver | `.trd` |
 
 Resolve reusable environment assets through the read-only environment listing before assigning a road, scenario, traffic driver, or traffic object reference. Use the available group names `Objects`, `Road`, `Scenario`, and `Traffic Driver`; treat returned paths and selectors as data, not as values to invent.
@@ -81,7 +86,7 @@ Every call returns a structured `ToolResult`-shaped value. Check the success fla
 
 ## Timeouts
 
-Keep every long-running operation within the configured timeout. Processing, test execution, downloads, synchronization, and maneuver control need bounded waits. On timeout, report the operation and current context, refresh status before deciding whether it completed, and avoid an automatic retry for an operation that may have reached the external system.
+The default `MODELDESK_MCP_OPERATION_TIMEOUT_SECONDS` is `60`. This bounds the caller's wait only; the dispatcher does not cancel COM work that has already been accepted. Processing, test execution, downloads, synchronization, and maneuver control may therefore continue after a timeout. Treat the outcome as unknown, do not retry automatically, and refresh status plus the affected list/state before deciding what to do next.
 
 ## Safe cleanup
 
@@ -96,9 +101,11 @@ Close only a project opened by the current workflow, and only when closing was a
 - `list_concrete_test_cases` scopes to one logical test case via `logicalTestCaseSelectorKind`/`logicalTestCaseSelectorValue` (defaults to the first logical test case, `index`/`0`).
 - `create_basic_road` is not atomic: if `trafficObjectsJson` references a catalog path that cannot be resolved, the call reports `ok:false` but the road itself is still created. Always re-list roads after any failed `create_basic_road` call and remove the orphaned road by name before retrying.
 - The Traffic Object Manager (TOM) catalog (`list_traffic_objects`/`get_traffic_objects_summary`) is separate from the filesystem-backed Environment Pool `Objects` group — TOM can legitimately be empty (count 0) even when the Environment Pool lists hundreds of files. Check `get_capabilities().trafficObjectCatalogMutation` before assuming a name from the Environment Pool listing can be validated or assigned; if mutation is disabled, `validate_traffic_object_reference` fails closed for every name.
-- Some tool errors leak raw, unredacted COM exception text through `error.message` instead of a structured message. Do not parse `error.message` for control flow; branch only on `errorType`.
+- `error.message` can contain sanitized COM exception details and is not a stable machine contract. Absolute local paths are redacted where recognized, but implementation-specific text may remain. Do not parse or echo the message; branch only on `errorType` and give the user a concise summary.
 
 ## Complete Tool Index
+
+When registered tools change, update the guidance below and run `uv run python tools_compare.py --reference .github/skills/modeldesk-mcp-tools/SKILL.md`. Require zero tools present only in the registry or only in the skill.
 
 <!-- BEGIN TOOL INDEX -->
 
@@ -112,7 +119,7 @@ Close only a project opened by the current workflow, and only when closing was a
 | `modeldesk_create_project_pool_file` | Create a generic project-pool file via CreateFile(Type, Name, OverwriteExisting). |
 | `modeldesk_list_environment_pool_items` | Read-only list of Environment Pool items for the selected group. |
 | `modeldesk_save_project` | Persist active project changes to disk. |
-| `modeldesk_close_project` | Close active project, optionally saving first to prevent unsaved state loss. |
+| `modeldesk_close_project` | Close active project, optionally saving first; `dryRun=true` previews without closing, but cannot detect unsaved changes. |
 | `modeldesk_list_experiments` | List experiments in the active project; usually followed by experiment activation. |
 | `modeldesk_activate_experiment` | Activate an experiment by selector; required before parameter-set, processing, and runtime tools. |
 | `modeldesk_save_active_experiment` | Persist active experiment state after mutations. |
@@ -148,10 +155,10 @@ Close only a project opened by the current workflow, and only when closing was a
 | `modeldesk_list_scenario_maneuvers` | List maneuvers in active scenario to resolve selectors and indices for edits. |
 | `modeldesk_add_scenario_fellow` | Add fellow/participant with optional properties, traffic-object reference, and driver reference. `trafficDriverReference` is unverified: the vendor API expects a relative path with no MCP discovery tool for it yet. |
 | `modeldesk_update_scenario_fellow` | Update selected fellow fields/references; prefer list -> select -> update flow. Both `selectorKind="index"` and `selectorKind="name"` are resolved reliably (name is translated to the fellow's collection index internally). |
-| `modeldesk_remove_scenario_fellow` | Remove selected fellow from active scenario. Both `selectorKind="index"` and `selectorKind="name"` are resolved reliably (name is translated to the fellow's collection index internally). |
+| `modeldesk_remove_scenario_fellow` | Remove selected fellow from active scenario; `dryRun=true` previews the target. Both `selectorKind="index"` and `selectorKind="name"` are resolved reliably (name is translated to the fellow's collection index internally). |
 | `modeldesk_add_scenario_maneuver` | Add maneuver to active scenario scope (ego) or selected fellow scope. Fellow scope resolves through `Fellow.Sequences`; both ego/active and fellow scope are reliable. |
 | `modeldesk_update_scenario_maneuver` | Update selected maneuver using `propertiesJson` on ego or fellow scope. Both ego/active and fellow scope are reliable. |
-| `modeldesk_remove_scenario_maneuver` | Remove selected maneuver from ego or selected fellow scope. Both ego/active and fellow scope are reliable. |
+| `modeldesk_remove_scenario_maneuver` | Remove selected maneuver from ego or selected fellow scope; `dryRun=true` previews the target. Both ego/active and fellow scope are reliable. |
 | `modeldesk_set_scenario_maneuver_sequence` | Set maneuver execution order using selector array JSON for ego or fellow scope. Both ego/active and fellow scope are reliable. |
 | `modeldesk_set_maneuver_behavior_profiles` | Set longitudinal/lateral behavior profile JSON on selected maneuver. Both ego/active and fellow scope are reliable. |
 | `modeldesk_get_scenario_road` | Read currently referenced road for the active scenario. |
@@ -172,16 +179,16 @@ Close only a project opened by the current workflow, and only when closing was a
 | `modeldesk_save_road_network_as` | Save active road network to an absolute `.rd` path. |
 | `modeldesk_add_road` | Add a road and initialize first lane section; `save`/`download` should stay false unless explicitly requested. |
 | `modeldesk_update_road` | Update selected road properties (currently name); resolve selector from list output first. |
-| `modeldesk_remove_road` | Remove selected road from active network; verify selector to avoid accidental deletion. |
+| `modeldesk_remove_road` | Remove selected road from active network; `dryRun=true` previews the target. Verify the selector to avoid accidental deletion. |
 | `modeldesk_add_road_segment` | Add typed segment (`Straight\|Circular\|Clothoid\|Spline`) to selected road using `propertiesJson`. Response `segmentIndex` is 1-based; do not reuse it as the 0-based input index for later calls. |
 | `modeldesk_update_road_segment` | Update segment type and/or properties by `segmentIndex` on selected road. `segmentIndex` here is 0-based, unlike the 1-based value in mutation responses. |
-| `modeldesk_remove_road_segment` | Remove one road segment by index from selected road. `segmentIndex` here is 0-based, unlike the 1-based value in mutation responses. |
+| `modeldesk_remove_road_segment` | Remove one road segment by index from selected road; `dryRun=true` previews the target. `segmentIndex` here is 0-based, unlike the 1-based value in mutation responses. |
 | `modeldesk_configure_road_lanes` | Configure lane counts/width (and optional length) for selected lane section. |
 | `modeldesk_add_road_object` | Add road-local traffic object at road-relative (`s`,`d`) with optional catalog/lane mapping. |
 | `modeldesk_update_road_object` | Update selected road-object fields using `propertiesJson` patch semantics. |
-| `modeldesk_remove_road_object` | Remove one road-local object by index from selected road. |
+| `modeldesk_remove_road_object` | Remove one road-local object by index from selected road; `dryRun=true` previews the target. |
 | `modeldesk_connect_roads` | Connect source/target road endpoints; `mode` controls geometry adaptation (`Move` or `Modify`). |
-| `modeldesk_disconnect_road` | Disconnect selected road connection point (`Start` or `End`). |
+| `modeldesk_disconnect_road` | Disconnect selected road connection point (`Start` or `End`); `dryRun=true` previews the target. |
 | `modeldesk_create_basic_road` | High-level helper: create straight road with lanes and optional traffic objects in one call. Not atomic — a failed traffic-object placement can still leave the road created; re-list roads and remove the orphan before retrying. |
 
 ### Plotting/PlotManager
@@ -206,8 +213,8 @@ Close only a project opened by the current workflow, and only when closing was a
 | `modeldesk_list_traffic_object_folders` | List catalog folders from Traffic Object Manager for path/selector discovery. |
 | `modeldesk_validate_traffic_object_reference` | Preflight check: validate traffic-object selector resolves before assignment to road/scenario. Fails closed for every name when the TOM catalog is empty or `trafficObjectCatalogMutation` capability is disabled, even if the name exists in the Environment Pool. |
 | `modeldesk_add_traffic_object` | Add traffic object entry to Traffic Object Manager (when capability is enabled). |
-| `modeldesk_remove_traffic_object` | Remove traffic object by selector; verify target via listing first. |
+| `modeldesk_remove_traffic_object` | Remove traffic object by selector; `dryRun=true` previews the target. Verify it via listing first. |
 | `modeldesk_add_traffic_object_folder` | Add folder to Traffic Object Manager hierarchy. |
-| `modeldesk_remove_traffic_object_folder` | Remove traffic-object folder by selector; confirm exact folder before delete. |
+| `modeldesk_remove_traffic_object_folder` | Remove traffic-object folder by selector; `dryRun=true` previews the target. Confirm the exact folder before removal. |
 
 <!-- END TOOL INDEX -->

@@ -77,14 +77,14 @@ class _FakeGateway:
     def add_traffic_object(self, name, object3d):
         self.calls.append(("add", name, object3d))
         return type("R", (), {"ok": True})()
-    def remove_traffic_object(self, selector):
-        self.calls.append(("remove", selector))
+    def remove_traffic_object(self, selector, dry_run=False):
+        self.calls.append(("remove", selector, dry_run))
         return type("R", (), {"ok": True})()
     def add_traffic_object_folder(self, name):
         self.calls.append(("add_folder", name))
         return type("R", (), {"ok": True})()
-    def remove_traffic_object_folder(self, selector):
-        self.calls.append(("remove_folder", selector))
+    def remove_traffic_object_folder(self, selector, dry_run=False):
+        self.calls.append(("remove_folder", selector, dry_run))
         return type("R", (), {"ok": True})()
 
 
@@ -178,6 +178,13 @@ def test_catalog_readback_and_mutation_capability_match_registered_api() -> None
     reference = gateway.validate_traffic_object_reference(Selector.create("path", "Vehicles/PassengerCar"))
     mutation = gateway.add_traffic_object("Truck", "Truck.dae")
     folder_added = gateway.add_traffic_object_folder("StaticAssets")
+    folder_preview = gateway.remove_traffic_object_folder(Selector.create("name", "StaticAssets"), dry_run=True)
+    object_preview = gateway.remove_traffic_object(Selector.create("id", "vehicle-1"), dry_run=True)
+    assert folder_preview.ok
+    assert object_preview.ok
+    assert folder_preview.to_dict()["data"]["details"]["dryRun"] == "true"
+    assert object_preview.to_dict()["data"]["details"]["dryRun"] == "true"
+    assert manager.remove_calls == []
     folder_removed = gateway.remove_traffic_object_folder(Selector.create("name", "StaticAssets"))
     object_removed = gateway.remove_traffic_object(Selector.create("id", "vehicle-1"))
 

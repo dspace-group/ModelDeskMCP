@@ -38,23 +38,23 @@ class ModelDeskService:
         """Add a traffic object to the Traffic Object Manager."""
         return self._gateway.add_traffic_object(name, object3d)
 
-    def remove_traffic_object(self, selector_kind: str, selector_value: str) -> ToolResult:
+    def remove_traffic_object(self, selector_kind: str, selector_value: str, dry_run: bool = False) -> ToolResult:
         """Remove a traffic object by selector (index, name, id, ...)."""
         selector = self._create_selector("modeldesk_remove_traffic_object", selector_kind, selector_value)
         if isinstance(selector, ToolResult):
             return selector
-        return self._gateway.remove_traffic_object(selector)
+        return self._gateway.remove_traffic_object(selector, dry_run)
 
     def add_traffic_object_folder(self, name: str) -> ToolResult:
         """Add a folder to the Traffic Object Manager."""
         return self._gateway.add_traffic_object_folder(name)
 
-    def remove_traffic_object_folder(self, selector_kind: str, selector_value: str) -> ToolResult:
+    def remove_traffic_object_folder(self, selector_kind: str, selector_value: str, dry_run: bool = False) -> ToolResult:
         """Remove a folder by selector (name, id, ...)."""
         selector = self._create_selector("modeldesk_remove_traffic_object_folder", selector_kind, selector_value)
         if isinstance(selector, ToolResult):
             return selector
-        return self._gateway.remove_traffic_object_folder(selector)
+        return self._gateway.remove_traffic_object_folder(selector, dry_run)
 
     def get_status(self) -> ToolResult:
         """Get ModelDesk and MCP bridge status."""
@@ -86,25 +86,25 @@ class ModelDeskService:
 
         return self._gateway.create_traffic_scenario(name, overwrite_existing)
 
-    def list_environment_pool_items(self, group: str, recursive: bool) -> ToolResult:
+    def list_environment_pool_items(self, group: str, recursive: bool, offset: int = 0) -> ToolResult:
         """List Environment Pool items for a group."""
 
-        return self._gateway.list_environment_pool_items(group, recursive)
+        return self._gateway.list_environment_pool_items(group, recursive, offset)
 
     def save_project(self) -> ToolResult:
         """Save the active project."""
 
         return self._gateway.save_project()
 
-    def close_project(self, save: bool) -> ToolResult:
+    def close_project(self, save: bool, dry_run: bool = False) -> ToolResult:
         """Close the active project."""
 
-        return self._gateway.close_project(save)
+        return self._gateway.close_project(save, dry_run)
 
-    def list_experiments(self) -> ToolResult:
+    def list_experiments(self, offset: int = 0) -> ToolResult:
         """List project experiments."""
 
-        return self._gateway.list_experiments()
+        return self._gateway.list_experiments(offset)
 
     def activate_experiment(self, selector_kind: str, selector_value: str, save_active: bool) -> ToolResult:
         """Activate an experiment."""
@@ -115,10 +115,10 @@ class ModelDeskService:
             return self._validation_failure("modeldesk_activate_experiment", public_error_message(exception))
         return self._gateway.activate_experiment(selector, save_active)
 
-    def list_parameter_sets(self) -> ToolResult:
+    def list_parameter_sets(self, offset: int = 0) -> ToolResult:
         """List parameter sets."""
 
-        return self._gateway.list_parameter_sets()
+        return self._gateway.list_parameter_sets(offset)
 
     def activate_parameter_set(self, selector_kind: str, selector_value: str, save_active: bool) -> ToolResult:
         """Activate a parameter set."""
@@ -173,10 +173,10 @@ class ModelDeskService:
             return self._validation_failure("modeldesk_activate_road", public_error_message(exception))
         return self._gateway.activate_road(selector)
 
-    def list_roads(self) -> ToolResult:
+    def list_roads(self, offset: int = 0) -> ToolResult:
         """List active-road-network roads."""
 
-        return self._gateway.list_roads()
+        return self._gateway.list_roads(offset)
 
     def save_road_network_as(self, file_name: str, overwrite_existing: bool) -> ToolResult:
         """Save active road network to file."""
@@ -196,13 +196,13 @@ class ModelDeskService:
             return selector
         return self._gateway.update_road(selector, name, save, download)
 
-    def remove_road(self, selector_kind: str, selector_value: str, save: bool, download: bool) -> ToolResult:
+    def remove_road(self, selector_kind: str, selector_value: str, save: bool, download: bool, dry_run: bool = False) -> ToolResult:
         """Remove a road."""
 
         selector = self._create_selector("modeldesk_remove_road", selector_kind, selector_value)
         if isinstance(selector, ToolResult):
             return selector
-        return self._gateway.remove_road(selector, save, download)
+        return self._gateway.remove_road(selector, save, download, dry_run)
 
     def add_road_segment(self, selector_kind: str, selector_value: str, segment_type: str, properties_json: str | None, insert_after_segment_index: int, save: bool, download: bool) -> ToolResult:
         """Add a road segment."""
@@ -220,13 +220,13 @@ class ModelDeskService:
             return selector
         return self._gateway.update_road_segment(selector, segment_index, segment_type, properties_json, save, download)
 
-    def remove_road_segment(self, selector_kind: str, selector_value: str, segment_index: int, save: bool, download: bool) -> ToolResult:
+    def remove_road_segment(self, selector_kind: str, selector_value: str, segment_index: int, save: bool, download: bool, dry_run: bool = False) -> ToolResult:
         """Remove a road segment."""
 
         selector = self._create_selector("modeldesk_remove_road_segment", selector_kind, selector_value)
         if isinstance(selector, ToolResult):
             return selector
-        return self._gateway.remove_road_segment(selector, segment_index, save, download)
+        return self._gateway.remove_road_segment(selector, segment_index, save, download, dry_run)
 
     def configure_road_lanes(self, selector_kind: str, selector_value: str, lane_section_index: int, left_lane_count: int, right_lane_count: int, lane_width: float, lane_section_length: float, save: bool, download: bool) -> ToolResult:
         """Configure road lanes."""
@@ -252,13 +252,13 @@ class ModelDeskService:
             return selector
         return self._gateway.update_road_object(selector, object_index, properties_json, save, download)
 
-    def remove_road_object(self, selector_kind: str, selector_value: str, object_index: int, save: bool, download: bool) -> ToolResult:
+    def remove_road_object(self, selector_kind: str, selector_value: str, object_index: int, save: bool, download: bool, dry_run: bool = False) -> ToolResult:
         """Remove a road object."""
 
         selector = self._create_selector("modeldesk_remove_road_object", selector_kind, selector_value)
         if isinstance(selector, ToolResult):
             return selector
-        return self._gateway.remove_road_object(selector, object_index, save, download)
+        return self._gateway.remove_road_object(selector, object_index, save, download, dry_run)
 
     def connect_roads(self, source_selector_kind: str, source_selector_value: str, source_point: str | None, target_selector_kind: str, target_selector_value: str, target_point: str | None, mode: str | None, save: bool, download: bool) -> ToolResult:
         """Connect roads."""
@@ -271,13 +271,13 @@ class ModelDeskService:
             return target_selector
         return self._gateway.connect_roads(source_selector, source_point, target_selector, target_point, mode, save, download)
 
-    def disconnect_road(self, selector_kind: str, selector_value: str, connection_point: str | None, save: bool, download: bool) -> ToolResult:
+    def disconnect_road(self, selector_kind: str, selector_value: str, connection_point: str | None, save: bool, download: bool, dry_run: bool = False) -> ToolResult:
         """Disconnect a road connection point."""
 
         selector = self._create_selector("modeldesk_disconnect_road", selector_kind, selector_value)
         if isinstance(selector, ToolResult):
             return selector
-        return self._gateway.disconnect_road(selector, connection_point, save, download)
+        return self._gateway.disconnect_road(selector, connection_point, save, download, dry_run)
 
     def create_basic_road(self, name: str | None, length: float, left_lane_count: int, right_lane_count: int, lane_width: float, traffic_objects_json: str | None, save: bool, download: bool) -> ToolResult:
         """Create a basic road."""
@@ -294,15 +294,15 @@ class ModelDeskService:
 
         return self._gateway.activate_scenario(scenario_name)
 
-    def list_scenario_fellows(self) -> ToolResult:
+    def list_scenario_fellows(self, offset: int = 0) -> ToolResult:
         """List scenario fellows."""
 
-        return self._gateway.list_scenario_fellows()
+        return self._gateway.list_scenario_fellows(offset)
 
-    def list_scenario_maneuvers(self) -> ToolResult:
+    def list_scenario_maneuvers(self, offset: int = 0) -> ToolResult:
         """List scenario maneuvers."""
 
-        return self._gateway.list_scenario_maneuvers()
+        return self._gateway.list_scenario_maneuvers(offset)
 
     def add_scenario_fellow(self, name: str | None, properties_json: str | None, traffic_object_selector_kind: str | None, traffic_object_selector_value: str | None, traffic_object_catalog_path: str | None, traffic_driver_reference: str | None, save: bool, download: bool) -> ToolResult:
         """Add scenario fellow."""
@@ -323,13 +323,13 @@ class ModelDeskService:
             return traffic_object_selector
         return self._gateway.update_scenario_fellow(fellow_selector, name, properties_json, traffic_object_selector, traffic_object_catalog_path, traffic_driver_reference, save, download)
 
-    def remove_scenario_fellow(self, fellow_selector_kind: str, fellow_selector_value: str, save: bool, download: bool) -> ToolResult:
+    def remove_scenario_fellow(self, fellow_selector_kind: str, fellow_selector_value: str, save: bool, download: bool, dry_run: bool = False) -> ToolResult:
         """Remove scenario fellow."""
 
         fellow_selector = self._create_selector("modeldesk_remove_scenario_fellow", fellow_selector_kind, fellow_selector_value)
         if isinstance(fellow_selector, ToolResult):
             return fellow_selector
-        return self._gateway.remove_scenario_fellow(fellow_selector, save, download)
+        return self._gateway.remove_scenario_fellow(fellow_selector, save, download, dry_run)
 
     def add_scenario_maneuver(self, fellow_selector_kind: str, fellow_selector_value: str, properties_json: str | None, save: bool, download: bool) -> ToolResult:
         """Add scenario maneuver."""
@@ -350,7 +350,7 @@ class ModelDeskService:
             return maneuver_selector
         return self._gateway.update_scenario_maneuver(fellow_selector, maneuver_selector, properties_json, save, download)
 
-    def remove_scenario_maneuver(self, fellow_selector_kind: str, fellow_selector_value: str, maneuver_selector_kind: str, maneuver_selector_value: str, save: bool, download: bool) -> ToolResult:
+    def remove_scenario_maneuver(self, fellow_selector_kind: str, fellow_selector_value: str, maneuver_selector_kind: str, maneuver_selector_value: str, save: bool, download: bool, dry_run: bool = False) -> ToolResult:
         """Remove scenario maneuver."""
 
         fellow_selector = self._create_selector("modeldesk_remove_scenario_maneuver", fellow_selector_kind, fellow_selector_value)
@@ -359,7 +359,7 @@ class ModelDeskService:
         maneuver_selector = self._create_selector("modeldesk_remove_scenario_maneuver", maneuver_selector_kind, maneuver_selector_value)
         if isinstance(maneuver_selector, ToolResult):
             return maneuver_selector
-        return self._gateway.remove_scenario_maneuver(fellow_selector, maneuver_selector, save, download)
+        return self._gateway.remove_scenario_maneuver(fellow_selector, maneuver_selector, save, download, dry_run)
 
     def set_scenario_maneuver_sequence(self, fellow_selector_kind: str, fellow_selector_value: str, maneuver_selectors_json: str, save: bool, download: bool) -> ToolResult:
         """Set scenario maneuver sequence."""
@@ -390,13 +390,13 @@ class ModelDeskService:
 
         return self._gateway.set_scenario_road(road_name, save, download)
 
-    def list_fellow_activities(self, fellow_selector_kind: str, fellow_selector_value: str) -> ToolResult:
+    def list_fellow_activities(self, fellow_selector_kind: str, fellow_selector_value: str, offset: int = 0) -> ToolResult:
         """List maneuvers/activities for a fellow or the ego vehicle."""
 
         fellow_selector = self._create_selector("modeldesk_list_fellow_activities", fellow_selector_kind, fellow_selector_value)
         if isinstance(fellow_selector, ToolResult):
             return fellow_selector
-        return self._gateway.list_fellow_activities(fellow_selector)
+        return self._gateway.list_fellow_activities(fellow_selector, offset)
 
     def get_vehicle_object_type(self, fellow_selector_kind: str, fellow_selector_value: str, maneuver_index: int) -> ToolResult:
         """Return the active 3D object type for a fellow or ego maneuver."""
@@ -406,13 +406,13 @@ class ModelDeskService:
             return fellow_selector
         return self._gateway.get_vehicle_object_type(fellow_selector, maneuver_index)
 
-    def list_vehicle_object_types(self, fellow_selector_kind: str, fellow_selector_value: str, maneuver_index: int) -> ToolResult:
+    def list_vehicle_object_types(self, fellow_selector_kind: str, fellow_selector_value: str, maneuver_index: int, offset: int = 0) -> ToolResult:
         """List all available 3D object types for a fellow or ego maneuver."""
 
         fellow_selector = self._create_selector("modeldesk_list_vehicle_object_types", fellow_selector_kind, fellow_selector_value)
         if isinstance(fellow_selector, ToolResult):
             return fellow_selector
-        return self._gateway.list_vehicle_object_types(fellow_selector, maneuver_index)
+        return self._gateway.list_vehicle_object_types(fellow_selector, maneuver_index, offset)
 
     def set_vehicle_object_type(self, fellow_selector_kind: str, fellow_selector_value: str, maneuver_index: int, element_index: int, save: bool, download: bool) -> ToolResult:
         """Activate a 3D object type by index for a fellow or ego maneuver."""
@@ -427,15 +427,15 @@ class ModelDeskService:
 
         return self._gateway.get_domain_summary(ModelDeskDomain.TRAFFIC_OBJECTS, "modeldesk_get_traffic_objects_summary")
 
-    def list_traffic_objects(self) -> ToolResult:
+    def list_traffic_objects(self, offset: int = 0) -> ToolResult:
         """List traffic objects."""
 
-        return self._gateway.list_traffic_objects()
+        return self._gateway.list_traffic_objects(offset)
 
-    def list_traffic_object_folders(self) -> ToolResult:
+    def list_traffic_object_folders(self, offset: int = 0) -> ToolResult:
         """List traffic-object folders."""
 
-        return self._gateway.list_traffic_object_folders()
+        return self._gateway.list_traffic_object_folders(offset)
 
     def validate_traffic_object_reference(self, selector_kind: str, selector_value: str) -> ToolResult:
         """Validate a traffic-object reference."""
@@ -470,18 +470,18 @@ class ModelDeskService:
 
         return self._gateway.activate_test(test_name)
 
-    def list_logical_test_cases(self) -> ToolResult:
+    def list_logical_test_cases(self, offset: int = 0) -> ToolResult:
         """List logical test cases."""
 
-        return self._gateway.list_logical_test_cases()
+        return self._gateway.list_logical_test_cases(offset)
 
-    def list_concrete_test_cases(self, logical_test_case_selector_kind: str, logical_test_case_selector_value: str) -> ToolResult:
+    def list_concrete_test_cases(self, logical_test_case_selector_kind: str, logical_test_case_selector_value: str, offset: int = 0) -> ToolResult:
         """List concrete test cases for one logical test case."""
 
         logical_test_case_selector = self._create_selector("modeldesk_list_concrete_test_cases", logical_test_case_selector_kind, logical_test_case_selector_value)
         if isinstance(logical_test_case_selector, ToolResult):
             return logical_test_case_selector
-        return self._gateway.list_concrete_test_cases(logical_test_case_selector)
+        return self._gateway.list_concrete_test_cases(logical_test_case_selector, offset)
 
     def execute_test(self, scope: str, selector_kind: str | None, selector_value: str | None) -> ToolResult:
         """Execute a test scope."""
@@ -501,15 +501,15 @@ class ModelDeskService:
             return selector
         return self._gateway.activate_plotting(selector)
 
-    def list_plot_captures(self) -> ToolResult:
+    def list_plot_captures(self, offset: int = 0) -> ToolResult:
         """List plot captures."""
 
-        return self._gateway.list_plot_captures()
+        return self._gateway.list_plot_captures(offset)
 
-    def list_plot_layouts(self) -> ToolResult:
+    def list_plot_layouts(self, offset: int = 0) -> ToolResult:
         """List plot layouts."""
 
-        return self._gateway.list_plot_layouts()
+        return self._gateway.list_plot_layouts(offset)
 
     def compare_captures(
         self,

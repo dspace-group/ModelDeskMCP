@@ -36,8 +36,8 @@ class _FakeGateway:
         self.calls.append((name, args))
         return ToolResult.success(name, "test-session", {})
 
-    def list_concrete_test_cases(self, logical_test_case_selector: Selector) -> ToolResult:
-        return self._record("list_concrete_test_cases", logical_test_case_selector)
+    def list_concrete_test_cases(self, logical_test_case_selector: Selector, offset: int = 0) -> ToolResult:
+        return self._record("list_concrete_test_cases", logical_test_case_selector, offset)
 
 
 def _make_service(fake_gateway: _FakeGateway) -> Any:
@@ -60,6 +60,7 @@ def test_service_list_concrete_test_cases_defaults_to_first_logical_test_case() 
     selector: Selector = args[0]
     assert selector.by == SelectorKind.INDEX
     assert selector.to_com_value() == 0
+    assert args[1] == 0
 
 
 def test_service_list_concrete_test_cases_routes_name_selector() -> None:
@@ -73,6 +74,7 @@ def test_service_list_concrete_test_cases_routes_name_selector() -> None:
     selector: Selector = args[0]
     assert selector.by == SelectorKind.NAME
     assert selector.value == "NCAP_AEB_CCR_Case2"
+    assert args[1] == 0
 
 
 def test_service_list_concrete_test_cases_rejects_invalid_selector() -> None:
