@@ -48,7 +48,7 @@ jobs:
           }
 
           $resources = .\ModelDeskMCP.cmd --list-resources
-          if ($resources.Trim() -ne 'No MCP resources are registered.') {
+          if ($resources.Trim() -ne 'modeldesk://workflow-catalog') {
             throw "Unexpected resource output: $resources"
           }
 

@@ -105,15 +105,9 @@ def snapshot_collection(collection: Any, item_kind: str, max_items: int, offset:
         raise ValueError("Collection offset must not be negative.")
     is_sequence = isinstance(collection, (tuple, list))
     count = len(collection) if is_sequence else get_count(collection)
-<<<<<<< Updated upstream
-    end_index = min(count, offset + max_items)
-    items: list[ItemSummary] = []
-    for item_index in range(offset, end_index):
-=======
     end_offset = min(count, offset + max_items)
     items: list[ItemSummary] = []
     for item_index in range(offset, end_offset):
->>>>>>> Stashed changes
         item = collection[item_index] if is_sequence else invoke_item(collection, item_index)
         if item is None:
             name = f"{item_kind} {item_index}"
@@ -128,13 +122,8 @@ def snapshot_collection(collection: Any, item_kind: str, max_items: int, offset:
             path = get_first_string_property(item, "Path", "CompleteName", "FileName")
             kind = get_first_string_property(item, "TypeName", "Kind", "ObjectType")
         items.append(ItemSummary(item_index, name, kind, path))
-<<<<<<< Updated upstream
-    is_truncated = end_index < count
-    return CollectionSnapshot(count, tuple(items), is_truncated, end_index if is_truncated else None)
-=======
     is_truncated = end_offset < count
     return CollectionSnapshot(count, tuple(items), is_truncated, end_offset if is_truncated else None)
->>>>>>> Stashed changes
 
 
 def resolve_item(collection: Any, selector: Selector) -> Any:

@@ -13,17 +13,13 @@ The wrappers below intentionally convert ``ToolResult`` objects to plain data;
 they do not call COM directly. COM access remains behind the service and
 ``modeldesk_mcp.com_bridge`` boundary.
 SDK-native field metadata documents the input properties, while a stable
-typed output payload documents the data returned by each operation.
+``ToolResultEnvelope`` leaves each operation's ``data`` contract flexible.
 """
 
 from __future__ import annotations
 
-<<<<<<< Updated upstream
-from typing import Annotated, Any, Literal, TypedDict, get_args, get_type_hints
-=======
 import json
 from typing import Annotated, Any, Literal, get_type_hints
->>>>>>> Stashed changes
 
 from mcp.types import ToolAnnotations
 from pydantic import Field
@@ -254,318 +250,26 @@ class ToolArtifactEnvelope(TypedDict):
     description: str | None
 
 
-ToolErrorCode = Literal["validation", "not_found", "timeout", "invalid_state", "com_error", "unexpected"]
-
-
 class ToolErrorEnvelope(TypedDict):
     """Stable structured error fields serialized by ``ToolResult.to_dict``."""
 
-<<<<<<< Updated upstream
-    errorType: ToolErrorCode
-=======
     errorType: Literal["validation", "not_found", "timeout", "invalid_state", "com_error", "unexpected"]
->>>>>>> Stashed changes
     message: str
     operation: str
     recovery: str | None
     isRetryable: bool
 
 
-class _ItemSummaryData(TypedDict):
-    index: int
-    name: str
-    kind: str | None
-    path: str | None
+class ToolResultEnvelope(TypedDict):
+    """Shared lower-camel tool response; operation-specific data stays flexible."""
 
-
-class _DomainSummaryData(TypedDict):
-    domain: str
-    available: bool
-    count: int
-    items: list[_ItemSummaryData]
-    properties: dict[str, str | None]
-    message: str | None
-    nextOffset: int | None
-
-
-class _OperationInfoData(TypedDict):
+    ok: bool
     operation: str
-    completed: bool
-    message: str | None
-    details: dict[str, str | None] | None
-
-
-class _ModelDeskStatusData(TypedDict):
     sessionId: str
-    modelDeskReachable: bool
-    modelDeskVersion: str | None
-    hasActiveProject: bool
-    activeProjectName: str | None
-    activeExperimentName: str | None
-    progId: str
-    processArchitecture: str
-
-
-class _CapabilityReportData(TypedDict):
-    serverVersion: str
-    dotNetVersion: str | None
-    operatingSystem: str
-    isWindows: bool
-    progId: str
-    modelDeskReachable: bool
-    domains: dict[str, bool]
-    disabledCapabilities: list[str]
-    pythonVersion: str
-
-
-class _ProjectInfoData(TypedDict):
-    hasActiveProject: bool
-    name: str | None
-    workingRoot: str | None
-    activeExperimentName: str | None
-
-
-class _ProjectPoolFileCreationInfoData(TypedDict):
-    fileType: str
-    typeId: int
-    name: str
-    expectedExtension: str
-    overwriteExisting: bool
-    createdName: str | None
-    createdPath: str | None
-    createdTypeName: str | None
-    message: str
-
-
-class _ParameterValueInfoData(TypedDict):
-    parameterPath: str
-    name: str | None
-    typeName: str | None
-    unit: str | None
-    value: str | None
-    numericValue: float | None
-
-
-class _BasicRoadCreatedTrafficObjectData(TypedDict):
-    name: str | None
-    catalogPath: str | None
-    s: float
-    d: float
-    laneMapping: list[int]
-
-
-class _BasicRoadCreationInfoData(TypedDict):
-    roadName: str
-    length: float
-    leftLaneCount: int
-    rightLaneCount: int
-    laneWidth: float
-    segmentCount: int
-    laneSectionCount: int
-    trafficObjectCount: int
-    saved: bool
-    downloaded: bool
-    trafficObjects: list[_BasicRoadCreatedTrafficObjectData]
-    message: str
-
-
-class _WorkflowPlanData(TypedDict):
-    name: str
-    useCase: str
-    dryRunOnly: bool
-    steps: list[str]
-    requiredTools: list[str]
-    message: str | None
-
-
-class _CaptureSummaryData(TypedDict):
-    name: str
-    sizeBytes: int
-    sampleCount: int
-    signalCount: int
-    timeStart: float
-    timeEnd: float
-    duration: float
-
-
-class _SignalSetData(TypedDict):
-    common: list[str]
-    onlyReference: list[str]
-    onlyCandidate: list[str]
-
-
-class _SignalMetricsData(TypedDict):
-    meanDifference: float
-    meanAbsoluteError: float
-    rootMeanSquaredError: float
-    maximumAbsoluteError: float
-
-
-class _SignalComparisonData(TypedDict):
-    referenceSignal: str
-    candidateSignal: str
-    referenceUnit: str
-    candidateUnit: str
-    alignment: str
-    status: str
-    sampleCount: int
-    timeStart: float
-    timeEnd: float
-    metrics: _SignalMetricsData
-    tolerances: dict[str, float]
-    withinTolerance: bool | None
-
-
-class _CaptureComparisonData(TypedDict):
-    referenceCapture: _CaptureSummaryData
-    candidateCapture: _CaptureSummaryData
-    signalSet: _SignalSetData
-    comparisons: list[_SignalComparisonData]
-    verdict: str
-
-
-class _UseCaseToolsData(TypedDict):
-    useCase: str
-    title: str
-    tools: list[str]
-    toolCount: int
-
-
-_DOMAIN_SUMMARY_TOOL_NAMES = frozenset(
-    {
-        "modeldesk_list_environment_pool_items",
-        "modeldesk_list_experiments",
-        "modeldesk_list_parameter_sets",
-        "modeldesk_get_parameterization_summary",
-        "modeldesk_get_active_model_info",
-        "modeldesk_get_road_summary",
-        "modeldesk_list_roads",
-        "modeldesk_get_scenario_summary",
-        "modeldesk_list_scenario_fellows",
-        "modeldesk_list_scenario_maneuvers",
-        "modeldesk_list_fellow_activities",
-        "modeldesk_list_vehicle_object_types",
-        "modeldesk_get_traffic_objects_summary",
-        "modeldesk_list_traffic_objects",
-        "modeldesk_list_traffic_object_folders",
-        "modeldesk_get_processing_summary",
-        "modeldesk_get_processing_configuration",
-        "modeldesk_get_test_summary",
-        "modeldesk_list_logical_test_cases",
-        "modeldesk_list_concrete_test_cases",
-        "modeldesk_get_plotting_summary",
-        "modeldesk_list_plot_captures",
-        "modeldesk_list_plot_layouts",
-    }
-)
-_TOOL_DATA_TYPE_BY_NAME: dict[str, Any] = {name: _OperationInfoData for name in EXPECTED_TOOL_NAMES}
-_TOOL_DATA_TYPE_BY_NAME.update({name: _DomainSummaryData for name in _DOMAIN_SUMMARY_TOOL_NAMES})
-_TOOL_DATA_TYPE_BY_NAME.update(
-    {
-        "modeldesk_get_status": _ModelDeskStatusData,
-        "modeldesk_get_capabilities": _CapabilityReportData,
-        "modeldesk_open_project": _ProjectInfoData,
-        "modeldesk_create_project_pool_file": _ProjectPoolFileCreationInfoData,
-        "modeldesk_create_road_network": _ProjectPoolFileCreationInfoData,
-        "modeldesk_create_traffic_scenario": _ProjectPoolFileCreationInfoData,
-        "modeldesk_get_parameter_value": _ParameterValueInfoData,
-        "modeldesk_create_basic_road": _BasicRoadCreationInfoData,
-        "modeldesk_compare_captures": _CaptureComparisonData,
-        "modeldesk_get_workflow_plan": _WorkflowPlanData,
-        "modeldesk_list_tools_by_use_case": _UseCaseToolsData,
-    }
-)
-
-
-def _tool_result_envelope_for(tool_name: str) -> Any:
-    envelope_name = "".join(part.title() for part in tool_name.split("_")) + "ResultEnvelope"
-    envelope = TypedDict(
-        envelope_name,
-        {
-            "ok": bool,
-            "operation": str,
-            "sessionId": str,
-            "data": Any,
-            "warnings": list[str],
-            "artifacts": list[ToolArtifactEnvelope],
-            "error": ToolErrorEnvelope | None,
-        },
-    )
-    envelope.__annotations__["data"] = _TOOL_DATA_TYPE_BY_NAME[tool_name] | None
-    envelope.__module__ = __name__
-    return envelope
-
-
-_READ_ONLY_TOOL_NAMES = frozenset(
-    {
-        "modeldesk_get_status",
-        "modeldesk_get_capabilities",
-        "modeldesk_list_environment_pool_items",
-        "modeldesk_list_experiments",
-        "modeldesk_list_parameter_sets",
-        "modeldesk_get_parameterization_summary",
-        "modeldesk_get_active_model_info",
-        "modeldesk_get_parameter_value",
-        "modeldesk_get_road_summary",
-        "modeldesk_list_roads",
-        "modeldesk_get_scenario_summary",
-        "modeldesk_list_scenario_fellows",
-        "modeldesk_list_scenario_maneuvers",
-        "modeldesk_get_scenario_road",
-        "modeldesk_list_fellow_activities",
-        "modeldesk_get_vehicle_object_type",
-        "modeldesk_list_vehicle_object_types",
-        "modeldesk_get_traffic_objects_summary",
-        "modeldesk_list_traffic_objects",
-        "modeldesk_list_traffic_object_folders",
-        "modeldesk_validate_traffic_object_reference",
-        "modeldesk_get_processing_summary",
-        "modeldesk_get_processing_configuration",
-        "modeldesk_get_test_summary",
-        "modeldesk_list_logical_test_cases",
-        "modeldesk_list_concrete_test_cases",
-        "modeldesk_get_plotting_summary",
-        "modeldesk_list_plot_captures",
-        "modeldesk_list_plot_layouts",
-        "modeldesk_compare_captures",
-        "modeldesk_get_workflow_plan",
-        "modeldesk_list_tools_by_use_case",
-    }
-)
-_ADDITIVE_TOOL_NAMES = frozenset(
-    {
-        "modeldesk_add_road",
-        "modeldesk_create_basic_road",
-        "modeldesk_add_road_segment",
-        "modeldesk_add_road_object",
-        "modeldesk_add_scenario_fellow",
-        "modeldesk_add_scenario_maneuver",
-        "modeldesk_add_traffic_object",
-        "modeldesk_add_traffic_object_folder",
-    }
-)
-_OPEN_WORLD_TOOL_NAMES = frozenset({"modeldesk_synchronize_aurelion"})
-_TOOLS_WITHOUT_COM_PRECONDITIONS = frozenset(
-    {"modeldesk_get_workflow_plan", "modeldesk_list_tools_by_use_case"}
-)
-_REPLAY_RISK_NOTES = {
-    "modeldesk_create_project_pool_file": "Replay risk: with overwriteExisting=true, retrying can overwrite an existing pool file.",
-    "modeldesk_create_road_network": "Replay risk: with overwriteExisting=true, retrying can overwrite an existing road network.",
-    "modeldesk_create_traffic_scenario": "Replay risk: with overwriteExisting=true, retrying can overwrite an existing traffic scenario.",
-    "modeldesk_add_road": "Replay risk: retrying may add a duplicate road; inspect the active network first.",
-    "modeldesk_add_road_segment": "Replay risk: retrying may add a duplicate segment; inspect the selected road first.",
-    "modeldesk_add_road_object": "Replay risk: retrying may add a duplicate road object; inspect the selected road first.",
-    "modeldesk_connect_roads": "Replay risk: the first call may already have changed road geometry; inspect both endpoints before retrying.",
-    "modeldesk_create_basic_road": "Replay risk: retrying may add a duplicate road and traffic objects; inspect the active network first.",
-    "modeldesk_add_scenario_fellow": "Replay risk: retrying may add a duplicate fellow; inspect the active scenario first.",
-    "modeldesk_add_scenario_maneuver": "Replay risk: retrying may add a duplicate maneuver; inspect the selected scope first.",
-    "modeldesk_add_traffic_object": "Replay risk: retrying may add a duplicate catalog object; inspect the catalog first.",
-    "modeldesk_add_traffic_object_folder": "Replay risk: retrying may add a duplicate folder; inspect the catalog first.",
-    "modeldesk_run_processing": "Replay risk: retrying runs processing again; inspect the active experiment and results first.",
-    "modeldesk_execute_test": "Replay risk: retrying starts another test run; inspect the active test state and outputs first.",
-    "modeldesk_start_maneuver": "Replay risk: retrying may start another runtime action; inspect current maneuver state first.",
-}
-_TOOL_FAILURE_CODES = get_args(ToolErrorCode)
+    data: Any
+    warnings: list[str]
+    artifacts: list[ToolArtifactEnvelope]
+    error: ToolErrorEnvelope | None
 
 
 class _ItemSummaryData(TypedDict):
@@ -985,11 +689,7 @@ _INPUT_FIELD_METADATA: dict[str, tuple[str, tuple[Any, ...] | None]] = {
     "d": ("Lateral road-relative traffic-object offset in meters.", (-1.75,)),
     "download": ("Whether to download the active experiment after the requested changes; false avoids runtime synchronization.", (False,)),
     "downloadIfNotRunning": ("Whether to download the active experiment before starting a maneuver when it is not running.", (True,)),
-<<<<<<< Updated upstream
-    "dryRun": ("Preview the target and intended effect without applying a mutation.", (False,)),
-=======
     "dryRun": ("Preview the target and planned effects without applying the requested mutation.", (False,)),
->>>>>>> Stashed changes
     "elementIndex": ("Zero-based vehicle-object type index returned by the type-list tool.", (0,)),
     "fellowSelectorKind": ("Optional fellow selector kind; active identifies the ego, otherwise use index or name.", ("active",)),
     "fellowSelectorValue": ("Value paired with the fellow selector; use active for the ego or a listed index/name value.", ("active",)),
@@ -1020,11 +720,7 @@ _INPUT_FIELD_METADATA: dict[str, tuple[str, tuple[Any, ...] | None]] = {
     "name": ("Name to create or assign to the ModelDesk item; uniqueness and accepted characters are domain-specific.", ("Road",)),
     "object3D": ("Traffic Object Manager 3D asset reference; empty is accepted for no 3D object.", ("Cube.obj",)),
     "objectIndex": ("Zero-based road traffic-object index.", (0,)),
-<<<<<<< Updated upstream
-    "offset": ("Zero-based item offset for paginated list results; page size is bounded by the configured collection limit.", (0,)),
-=======
     "offset": ("Zero-based item offset for paginated list results; page size is bounded by MODELDESK_MCP_MAX_COLLECTION_ITEMS.", (0,)),
->>>>>>> Stashed changes
     "overwriteExisting": ("Whether an existing project-pool file may be overwritten.", (False,)),
     "parameterPath": ("Exact parameter path in the active parameter set.", ("Vehicle.Speed",)),
     "platformName": ("Optional model platform name passed to SetActiveModel.", ("ASM",)),
@@ -1078,26 +774,17 @@ def _documented_tool_registrar(mcp: Any) -> Any:
                 name=name,
                 annotations=ToolAnnotations(
                     read_only_hint=True if name in _READ_ONLY_TOOL_NAMES else None,
-<<<<<<< Updated upstream
-                    destructive_hint=False if name in _ADDITIVE_TOOL_NAMES else None,
-                    idempotent_hint=True if name in _READ_ONLY_TOOL_NAMES else None,
-=======
                     destructive_hint=False if name in _ADDITIVE_TOOL_NAMES | _NON_DESTRUCTIVE_CONTEXT_TOOL_NAMES else None,
                     idempotent_hint=True if name in _READ_ONLY_TOOL_NAMES | _IDEMPOTENT_TOOL_NAMES else None,
->>>>>>> Stashed changes
                     open_world_hint=name in _OPEN_WORLD_TOOL_NAMES,
                 ),
             )
 
             def decorate(function: Any) -> Any:
-<<<<<<< Updated upstream
-                function.__doc__ = _document_tool_description(name, function.__doc__)
-=======
                 replay_risk = _REPLAY_RISK_NOTES.get(name)
                 if replay_risk is not None:
                     purpose = (function.__doc__ or "").strip()
                     function.__doc__ = f"{purpose}\n\nReplay risk: {replay_risk}"
->>>>>>> Stashed changes
                 annotations = get_type_hints(function, include_extras=True)
                 input_parameters = tuple(key for key in annotations if key != "return")
                 function.__doc__ = _document_tool_contract(name, function.__doc__, input_parameters)
@@ -1126,22 +813,6 @@ def _documented_tool_registrar(mcp: Any) -> Any:
     return DocumentedToolRegistrar()
 
 
-<<<<<<< Updated upstream
-def _document_tool_description(name: str, description: str | None) -> str:
-    purpose = (description or "").strip()
-    if name in _TOOLS_WITHOUT_COM_PRECONDITIONS:
-        preconditions = "The requested workflow or use case must be registered; no active ModelDesk context is required."
-    else:
-        preconditions = "ModelDesk COM must be registered; any active project, experiment, and domain required by this operation must be available."
-    clauses = [
-        purpose,
-        f"Preconditions: {preconditions}",
-        f"Possible failure codes: {', '.join(_TOOL_FAILURE_CODES)}.",
-    ]
-    replay_risk = _REPLAY_RISK_NOTES.get(name)
-    if replay_risk is not None:
-        clauses.append(replay_risk)
-=======
 def _document_tool_contract(name: str, description: str | None, input_parameters: tuple[str, ...]) -> str:
     purpose = (description or "").strip()
     if name in _CONTEXT_FREE_TOOL_NAMES:
@@ -1214,7 +885,6 @@ def _document_tool_contract(name: str, description: str | None, input_parameters
         clauses.append(
             "Timeout behavior: the caller waits up to MODELDESK_MCP_OPERATION_TIMEOUT_SECONDS (default 60); accepted COM work is not canceled on timeout, and this tool emits no progress notifications."
         )
->>>>>>> Stashed changes
     return "\n\n".join(clauses)
 
 
@@ -1412,11 +1082,7 @@ def register_tools(mcp: Any, service: ModelDeskService) -> None:
         return _to_dict(service.update_road(roadSelectorKind, roadSelectorValue, name, save, download))
 
     @mcp.tool(name="modeldesk_remove_road")
-<<<<<<< Updated upstream
-    def modeldesk_remove_road(roadSelectorKind: str = "index", roadSelectorValue: str = "0", save: bool = False, download: bool = False, dryRun: bool = False) -> dict[str, Any]:
-=======
     def modeldesk_remove_road(roadSelectorKind: str, roadSelectorValue: str, save: bool = False, download: bool = False, dryRun: bool = False) -> dict[str, Any]:
->>>>>>> Stashed changes
         """Remove selected road from active network; verify selector to avoid accidental deletion."""
 
         return _to_dict(service.remove_road(roadSelectorKind, roadSelectorValue, save, download, dryRun))
@@ -1434,11 +1100,7 @@ def register_tools(mcp: Any, service: ModelDeskService) -> None:
         return _to_dict(service.update_road_segment(roadSelectorKind, roadSelectorValue, segmentIndex, segmentType, _json_payload_text(propertiesJson or {}), save, download))
 
     @mcp.tool(name="modeldesk_remove_road_segment")
-<<<<<<< Updated upstream
-    def modeldesk_remove_road_segment(roadSelectorKind: str = "index", roadSelectorValue: str = "0", segmentIndex: int = 0, save: bool = False, download: bool = False, dryRun: bool = False) -> dict[str, Any]:
-=======
     def modeldesk_remove_road_segment(roadSelectorKind: str, roadSelectorValue: str, segmentIndex: int, save: bool = False, download: bool = False, dryRun: bool = False) -> dict[str, Any]:
->>>>>>> Stashed changes
         """Remove one road segment by index from selected road."""
 
         return _to_dict(service.remove_road_segment(roadSelectorKind, roadSelectorValue, segmentIndex, save, download, dryRun))
@@ -1462,11 +1124,7 @@ def register_tools(mcp: Any, service: ModelDeskService) -> None:
         return _to_dict(service.update_road_object(roadSelectorKind, roadSelectorValue, objectIndex, _json_payload_text(propertiesJson or {}), save, download))
 
     @mcp.tool(name="modeldesk_remove_road_object")
-<<<<<<< Updated upstream
-    def modeldesk_remove_road_object(roadSelectorKind: str = "index", roadSelectorValue: str = "0", objectIndex: int = 0, save: bool = False, download: bool = False, dryRun: bool = False) -> dict[str, Any]:
-=======
     def modeldesk_remove_road_object(roadSelectorKind: str, roadSelectorValue: str, objectIndex: int, save: bool = False, download: bool = False, dryRun: bool = False) -> dict[str, Any]:
->>>>>>> Stashed changes
         """Remove one road-local object by index from selected road."""
 
         return _to_dict(service.remove_road_object(roadSelectorKind, roadSelectorValue, objectIndex, save, download, dryRun))
@@ -1478,11 +1136,7 @@ def register_tools(mcp: Any, service: ModelDeskService) -> None:
         return _to_dict(service.connect_roads(sourceRoadSelectorKind, sourceRoadSelectorValue, sourcePoint, targetRoadSelectorKind, targetRoadSelectorValue, targetPoint, mode, save, download))
 
     @mcp.tool(name="modeldesk_disconnect_road")
-<<<<<<< Updated upstream
-    def modeldesk_disconnect_road(roadSelectorKind: str = "index", roadSelectorValue: str = "0", connectionPoint: str = "End", save: bool = False, download: bool = False, dryRun: bool = False) -> dict[str, Any]:
-=======
     def modeldesk_disconnect_road(roadSelectorKind: str, roadSelectorValue: str, connectionPoint: str = "End", save: bool = False, download: bool = False, dryRun: bool = False) -> dict[str, Any]:
->>>>>>> Stashed changes
         """Disconnect selected road connection point (`Start` or `End`)."""
 
         return _to_dict(service.disconnect_road(roadSelectorKind, roadSelectorValue, connectionPoint, save, download, dryRun))
@@ -1530,11 +1184,7 @@ def register_tools(mcp: Any, service: ModelDeskService) -> None:
         return _to_dict(service.update_scenario_fellow(fellowSelectorKind, fellowSelectorValue, name, _json_payload_text(propertiesJson or {}), trafficObjectSelectorKind, trafficObjectSelectorValue, trafficObjectCatalogPath, trafficDriverReference, save, download))
 
     @mcp.tool(name="modeldesk_remove_scenario_fellow")
-<<<<<<< Updated upstream
-    def modeldesk_remove_scenario_fellow(fellowSelectorKind: str = "index", fellowSelectorValue: str = "0", save: bool = False, download: bool = False, dryRun: bool = False) -> dict[str, Any]:
-=======
     def modeldesk_remove_scenario_fellow(fellowSelectorKind: str, fellowSelectorValue: str, save: bool = False, download: bool = False, dryRun: bool = False) -> dict[str, Any]:
->>>>>>> Stashed changes
         """Remove selected fellow from active scenario."""
 
         return _to_dict(service.remove_scenario_fellow(fellowSelectorKind, fellowSelectorValue, save, download, dryRun))
@@ -1552,11 +1202,7 @@ def register_tools(mcp: Any, service: ModelDeskService) -> None:
         return _to_dict(service.update_scenario_maneuver(fellowSelectorKind, fellowSelectorValue, maneuverSelectorKind, maneuverSelectorValue, _json_payload_text(propertiesJson or {}), save, download))
 
     @mcp.tool(name="modeldesk_remove_scenario_maneuver")
-<<<<<<< Updated upstream
-    def modeldesk_remove_scenario_maneuver(fellowSelectorKind: str | None = None, fellowSelectorValue: str | None = None, maneuverSelectorKind: str = "index", maneuverSelectorValue: str = "0", save: bool = False, download: bool = False, dryRun: bool = False) -> dict[str, Any]:
-=======
     def modeldesk_remove_scenario_maneuver(*, fellowSelectorKind: str | None = None, fellowSelectorValue: str | None = None, maneuverSelectorKind: str, maneuverSelectorValue: str, save: bool = False, download: bool = False, dryRun: bool = False) -> dict[str, Any]:
->>>>>>> Stashed changes
         """Remove selected maneuver from ego or selected fellow scope."""
 
         return _to_dict(service.remove_scenario_maneuver(fellowSelectorKind, fellowSelectorValue, maneuverSelectorKind, maneuverSelectorValue, save, download, dryRun))

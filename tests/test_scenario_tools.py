@@ -370,8 +370,7 @@ def _gateway_for_application(application: Any) -> ModelDeskAutomationGateway:
     return gateway
 
 
-<<<<<<< Updated upstream
-def test_scenario_removal_dry_runs_resolve_targets_without_mutating_collections() -> None:
+def test_scenario_removal_dry_runs_resolve_ego_and_fellow_targets_without_mutating_collections() -> None:
     fellow = SimpleNamespace(Name="Truck1")
     maneuver = SimpleNamespace(Name="Turn")
     fellows = _FakeComCollection([fellow])
@@ -395,7 +394,8 @@ def test_scenario_removal_dry_runs_resolve_targets_without_mutating_collections(
     assert maneuver_preview.to_dict()["data"]["details"]["dryRun"] == "true"
     assert fellows.items == [fellow]
     assert maneuvers.items == [maneuver]
-=======
+
+
 def test_scenario_removal_dry_runs_do_not_mutate_or_persist() -> None:
     events: list[tuple[str, Any]] = []
 
@@ -444,7 +444,6 @@ def test_scenario_removal_dry_runs_do_not_mutate_or_persist() -> None:
     assert fellows.items == [fellow]
     assert maneuvers.items == [maneuver]
     assert events == []
->>>>>>> Stashed changes
 
 
 class _FakeProfileValue:

@@ -490,13 +490,6 @@ def test_road_crud_save_download_and_save_as_use_active_network(tmp_path) -> Non
     assert saved_as.ok
     assert road_network.save_as_call == (str(save_as_path.resolve()), False)
 
-<<<<<<< Updated upstream
-    preview = gateway.remove_road(Selector.create("index", "0"), save=False, download=False, dry_run=True)
-
-    assert preview.ok
-    assert preview.to_dict()["data"]["details"]["dryRun"] == "true"
-    assert road_network.Roads.Count == 1
-=======
     calls_before_preview = list(persistence_calls)
     roads_before_preview = road_network.Roads.Count
     removal_preview = gateway.remove_road(Selector.create("index", "0"), save=True, download=True, dry_run=True)
@@ -508,7 +501,6 @@ def test_road_crud_save_download_and_save_as_use_active_network(tmp_path) -> Non
     assert preview_details["wouldDownload"] == "true"
     assert road_network.Roads.Count == roads_before_preview
     assert persistence_calls == calls_before_preview
->>>>>>> Stashed changes
 
     removed = gateway.remove_road(Selector.create("index", "0"), save=False, download=False)
 

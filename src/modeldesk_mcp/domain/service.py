@@ -354,11 +354,7 @@ class ModelDeskService:
             return maneuver_selector
         return self._gateway.update_scenario_maneuver(fellow_selector, maneuver_selector, properties_json, save, download)
 
-<<<<<<< Updated upstream
-    def remove_scenario_maneuver(self, fellow_selector_kind: str, fellow_selector_value: str, maneuver_selector_kind: str, maneuver_selector_value: str, save: bool, download: bool, dry_run: bool = False) -> ToolResult:
-=======
     def remove_scenario_maneuver(self, fellow_selector_kind: str | None, fellow_selector_value: str | None, maneuver_selector_kind: str, maneuver_selector_value: str, save: bool, download: bool, dry_run: bool = False) -> ToolResult:
->>>>>>> Stashed changes
         """Remove scenario maneuver."""
 
         fellow_selector = self._create_optional_selector("modeldesk_remove_scenario_maneuver", fellow_selector_kind, fellow_selector_value)

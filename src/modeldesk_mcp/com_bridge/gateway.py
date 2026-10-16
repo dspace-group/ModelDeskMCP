@@ -117,17 +117,9 @@ class ModelDeskAutomationGateway:
             traffic_objects = _get_first_available_property(manager, "TrafficObjects", "Objects")
             obj = com.resolve_item(traffic_objects, selector)
             object_id = com.get_first_string_property(obj, "ObjectID", "Name", "CompleteName")
-<<<<<<< Updated upstream
-            if dry_run:
-                return _dry_run_preview(
-                    "modeldesk_remove_traffic_object",
-                    {"objectId": object_id, "selectorKind": selector.by.value, "selectorValue": selector.value},
-                )
-=======
             details = {"objectId": object_id, "selectorKind": selector.by.value, "selectorValue": selector.value}
             if dry_run:
                 return _dry_run_preview("modeldesk_remove_traffic_object", details)
->>>>>>> Stashed changes
             result = com.invoke_method(manager, "RemoveTrafficObject", object_id)
             if isinstance(result, bool) and not result:
                 raise RuntimeError("Traffic object removal returned false.")
@@ -158,17 +150,9 @@ class ModelDeskAutomationGateway:
             folders = _get_required_property(manager, "Folders")
             folder = com.resolve_item(folders, selector)
             folder_name = com.get_first_string_property(folder, "Name", "CompleteName")
-<<<<<<< Updated upstream
-            if dry_run:
-                return _dry_run_preview(
-                    "modeldesk_remove_traffic_object_folder",
-                    {"folderName": folder_name, "selectorKind": selector.by.value, "selectorValue": selector.value},
-                )
-=======
             details = {"folderName": folder_name, "selectorKind": selector.by.value, "selectorValue": selector.value}
             if dry_run:
                 return _dry_run_preview("modeldesk_remove_traffic_object_folder", details)
->>>>>>> Stashed changes
             result = com.invoke_method(manager, "RemoveFolder", folder_name)
             if isinstance(result, bool) and not result:
                 raise RuntimeError("Traffic object folder removal returned false.")
@@ -1284,14 +1268,10 @@ class ModelDeskAutomationGateway:
             message = f"Environment Pool group directory '{group_path}' does not exist."
             return DomainSummary(request.domain_name(), False, 0, (), properties, message)
         file_paths, total_count, next_offset = _enumerate_environment_pool_files(group_path, request, max_items, offset)
-<<<<<<< Updated upstream
-        items = tuple(ItemSummary(index, _environment_pool_item_name(group_path, path), request.item_kind(), str(path)) for index, path in enumerate(file_paths, start=offset))
-=======
         items = tuple(
             ItemSummary(index, _environment_pool_item_name(group_path, path), request.item_kind(), str(path))
             for index, path in enumerate(file_paths, start=offset)
         )
->>>>>>> Stashed changes
         properties["matchedItemCount"] = str(total_count)
         properties["pageItemCount"] = str(len(items))
         properties["truncated"] = str(next_offset is not None)
@@ -1651,11 +1631,7 @@ class ModelDeskAutomationGateway:
     def _create_collection_summary(self, domain: str, collection: Any, item_kind: str, offset: int = 0) -> DomainSummary:
         snapshot = com.snapshot_collection(collection, item_kind, self._options.max_collection_items, offset)
         properties = com.read_properties(collection, "Name", "TypeName")
-<<<<<<< Updated upstream
-        message = f"Result was truncated to {self._options.max_collection_items} items." if snapshot.is_truncated else None
-=======
         message = f"More items available; request offset {snapshot.next_offset}." if snapshot.is_truncated else None
->>>>>>> Stashed changes
         return DomainSummary(domain, True, snapshot.count, snapshot.items, properties, message, snapshot.next_offset)
 
     def _create_first_available_collection_summary(self, domain: str, instance: Any, item_kind: str, *property_candidates: str, offset: int = 0) -> DomainSummary:
@@ -2621,22 +2597,3 @@ def _dry_run_preview(
     if download is not None:
         preview_details["wouldDownload"] = str(download).lower()
     return OperationInfo(operation_name, True, message, preview_details)
-<<<<<<< Updated upstream
-=======
-
-
-def _dry_run_preview(
-    operation_name: str,
-    details: dict[str, str | None],
-    save: bool | None = None,
-    download: bool | None = None,
-    message: str = "Dry-run preview; no changes were applied.",
-) -> OperationInfo:
-    preview_details = dict(details)
-    preview_details["dryRun"] = "true"
-    if save is not None:
-        preview_details["wouldSave"] = str(save).lower()
-    if download is not None:
-        preview_details["wouldDownload"] = str(download).lower()
-    return OperationInfo(operation_name, True, message, preview_details)
->>>>>>> Stashed changes

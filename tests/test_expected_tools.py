@@ -7,11 +7,6 @@ import re
 from typing import Any
 
 from modeldesk_mcp.com_bridge.gateway import ModelDeskAutomationGateway
-<<<<<<< Updated upstream
-from modeldesk_mcp.contracts import ModelDeskStatus, ToolResult, public_error_message
-from modeldesk_mcp.tools import EXPECTED_TOOL_NAMES, TOOL_DOMAIN_BY_NAME, TOOL_DOMAINS, register_tools
-from modeldesk_mcp.tools.registry import _ADDITIVE_TOOL_NAMES, _OPEN_WORLD_TOOL_NAMES, _READ_ONLY_TOOL_NAMES
-=======
 from modeldesk_mcp.contracts import ModelDeskStatus, ParameterValueInfo, ToolResult, public_error_message
 from modeldesk_mcp.tools import EXPECTED_TOOL_NAMES, TOOL_DOMAIN_BY_NAME, TOOL_DOMAINS, register_tools
 from modeldesk_mcp.tools.registry import (
@@ -22,7 +17,6 @@ from modeldesk_mcp.tools.registry import (
     _READ_ONLY_TOOL_NAMES,
     _REPLAY_RISK_NOTES,
 )
->>>>>>> Stashed changes
 
 
 class FakeMcp:
@@ -113,8 +107,6 @@ def test_real_mcp_schemas_document_inputs_and_share_tool_result_envelope() -> No
                 "schema-test",
                 ModelDeskStatus("schema-test", True, None, False, None, None, "ModelDesk.Application", "AMD64"),
             )
-<<<<<<< Updated upstream
-=======
 
         def set_parameter_value(self, parameter_path: str, value_kind: str, value_json: str) -> ToolResult:
             self.value_json = value_json
@@ -123,7 +115,6 @@ def test_real_mcp_schemas_document_inputs_and_share_tool_result_envelope() -> No
                 "schema-test",
                 ParameterValueInfo(parameter_path, None, None, None, value_json, None),
             )
->>>>>>> Stashed changes
 
     server = MCPServer("schema-test")
     schema_service = SchemaService()
@@ -188,10 +179,6 @@ def test_real_mcp_schemas_document_inputs_and_share_tool_result_envelope() -> No
         "modeldesk_list_concrete_test_cases",
         "modeldesk_list_plot_captures",
         "modeldesk_list_plot_layouts",
-<<<<<<< Updated upstream
-    }
-    dry_run_tools = {
-=======
         "modeldesk_get_parameterization_summary",
         "modeldesk_get_active_model_info",
         "modeldesk_get_road_summary",
@@ -225,7 +212,6 @@ def test_real_mcp_schemas_document_inputs_and_share_tool_result_envelope() -> No
         "modeldesk_create_road_network",
         "modeldesk_create_traffic_scenario",
         "modeldesk_save_road_network_as",
->>>>>>> Stashed changes
         "modeldesk_close_project",
         "modeldesk_remove_road",
         "modeldesk_remove_road_segment",
@@ -236,8 +222,6 @@ def test_real_mcp_schemas_document_inputs_and_share_tool_result_envelope() -> No
         "modeldesk_remove_traffic_object",
         "modeldesk_remove_traffic_object_folder",
     }
-<<<<<<< Updated upstream
-=======
     replay_risk_tool_names = {
         "modeldesk_open_project",
         "modeldesk_create_project_pool_file",
@@ -265,69 +249,12 @@ def test_real_mcp_schemas_document_inputs_and_share_tool_result_envelope() -> No
         "modeldesk_start_maneuver",
     }
     assert replay_risk_tool_names <= _REPLAY_RISK_NOTES.keys()
->>>>>>> Stashed changes
     for tool in tools:
         assert tool.output_schema is not None
         assert set(tool.output_schema["properties"]) == envelope_properties
         data_schema = tool.output_schema["properties"]["data"]
         assert "anyOf" in data_schema
         data_branch = next(branch for branch in data_schema["anyOf"] if branch.get("type") != "null")
-<<<<<<< Updated upstream
-        if "$ref" in data_branch:
-            definition_name = data_branch["$ref"].rsplit("/", 1)[-1]
-            data_definition = tool.output_schema["$defs"][definition_name]
-        else:
-            data_definition = data_branch
-        assert data_definition["type"] == "object"
-        assert data_definition["properties"]
-
-        error_schema = tool.output_schema["$defs"]["ToolErrorEnvelope"]["properties"]["errorType"]
-        assert error_schema["enum"] == [
-            "validation",
-            "not_found",
-            "timeout",
-            "invalid_state",
-            "com_error",
-            "unexpected",
-        ]
-
-        annotations = tool.annotations
-        assert annotations is not None
-        assert annotations.read_only_hint is (True if tool.name in _READ_ONLY_TOOL_NAMES else None)
-        assert annotations.open_world_hint is (tool.name in _OPEN_WORLD_TOOL_NAMES)
-        assert annotations.destructive_hint is (False if tool.name in _ADDITIVE_TOOL_NAMES else None)
-        assert annotations.idempotent_hint is (True if annotations.read_only_hint else None)
-        assert "Preconditions:" in (tool.description or "")
-        assert "Possible failure codes:" in (tool.description or "")
-        if tool.name in paginated_tools:
-            offset_schema = tool.input_schema["properties"]["offset"]
-            assert offset_schema["default"] == 0
-            assert "offset" in offset_schema["description"].lower()
-            assert "nextOffset" in data_definition["properties"]
-        if tool.name in dry_run_tools:
-            dry_run_schema = tool.input_schema["properties"]["dryRun"]
-            assert dry_run_schema["default"] is False
-            assert "preview" in dry_run_schema["description"].lower()
-
-    replay_risk_tools = {
-        "modeldesk_create_project_pool_file",
-        "modeldesk_create_road_network",
-        "modeldesk_create_traffic_scenario",
-        "modeldesk_add_road",
-        "modeldesk_add_road_segment",
-        "modeldesk_add_road_object",
-        "modeldesk_connect_roads",
-        "modeldesk_create_basic_road",
-        "modeldesk_add_scenario_fellow",
-        "modeldesk_add_scenario_maneuver",
-        "modeldesk_add_traffic_object",
-        "modeldesk_add_traffic_object_folder",
-        "modeldesk_run_processing",
-        "modeldesk_execute_test",
-        "modeldesk_start_maneuver",
-    }
-    assert all("Replay risk:" in by_name.description for by_name in tools if by_name.name in replay_risk_tools)
-=======
         assert "$ref" in data_branch
         definition_name = data_branch["$ref"].rsplit("/", 1)[-1]
         data_definition = tool.output_schema["$defs"][definition_name]
@@ -364,7 +291,6 @@ def test_real_mcp_schemas_document_inputs_and_share_tool_result_envelope() -> No
         if tool.name in dry_run_tools:
             dry_run_schema = tool.input_schema["properties"]["dryRun"]
             assert dry_run_schema["default"] is False
->>>>>>> Stashed changes
 
     result = asyncio.run(server.call_tool("modeldesk_get_status", {}))
     assert result.structured_content == {

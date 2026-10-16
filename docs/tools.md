@@ -32,15 +32,7 @@ Effects describe the principal operation, not a guarantee of availability or ato
 
 Keep `save=false` and `download=false` on editing tools until persistence and runtime synchronization are intended. This still allows in-memory changes. `saveActive` and project-close `save` default to true; maneuver startup also defaults to downloading if runtime is not running. Execute dependent calls sequentially and inspect state again after an error.
 
-<<<<<<< Updated upstream
-## Pagination and Dry-Run
-
-The collection tools `modeldesk_list_environment_pool_items`, `modeldesk_list_experiments`, `modeldesk_list_parameter_sets`, `modeldesk_list_roads`, `modeldesk_list_scenario_fellows`, `modeldesk_list_scenario_maneuvers`, `modeldesk_list_fellow_activities`, `modeldesk_list_vehicle_object_types`, `modeldesk_list_traffic_objects`, `modeldesk_list_traffic_object_folders`, `modeldesk_list_logical_test_cases`, `modeldesk_list_concrete_test_cases`, `modeldesk_list_plot_captures`, and `modeldesk_list_plot_layouts` accept a zero-based `offset` (default `0`). Page size is bounded by `MODELDESK_MCP_MAX_COLLECTION_ITEMS` (default `500`). Continue with `data.nextOffset` until it is `null`; `data.count` reports the total collection size.
-
-`dryRun=true` previews the target without applying the operation on `modeldesk_close_project`, `modeldesk_remove_road`, `modeldesk_remove_road_segment`, `modeldesk_remove_road_object`, `modeldesk_disconnect_road`, `modeldesk_remove_scenario_fellow`, `modeldesk_remove_scenario_maneuver`, `modeldesk_remove_traffic_object`, and `modeldesk_remove_traffic_object_folder`. It defaults to `false`. A preview returns `data.details.dryRun=true` and does not save or download. For project close, the preview cannot inspect whether unsaved changes exist and returns `unsavedChanges="unknown"`.
-=======
 The static MCP resource `modeldesk://workflow-catalog` lists all workflow names, ordered steps, required tools, and supported use-case identifiers. Read it before calling `modeldesk_get_workflow_plan` or `modeldesk_list_tools_by_use_case` when the exact name or identifier is unknown.
->>>>>>> Stashed changes
 
 ## Shared Infrastructure
 

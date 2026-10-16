@@ -180,14 +180,11 @@ def test_catalog_readback_and_mutation_capability_match_registered_api() -> None
     folder_added = gateway.add_traffic_object_folder("StaticAssets")
     folder_preview = gateway.remove_traffic_object_folder(Selector.create("name", "StaticAssets"), dry_run=True)
     object_preview = gateway.remove_traffic_object(Selector.create("id", "vehicle-1"), dry_run=True)
-<<<<<<< Updated upstream
     assert folder_preview.ok
     assert object_preview.ok
     assert folder_preview.to_dict()["data"]["details"]["dryRun"] == "true"
     assert object_preview.to_dict()["data"]["details"]["dryRun"] == "true"
     assert manager.remove_calls == []
-=======
->>>>>>> Stashed changes
     folder_removed = gateway.remove_traffic_object_folder(Selector.create("name", "StaticAssets"))
     object_removed = gateway.remove_traffic_object(Selector.create("id", "vehicle-1"))
 
