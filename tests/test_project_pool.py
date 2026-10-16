@@ -137,3 +137,53 @@ def test_specialized_pool_creation_uses_source_defined_road_and_scenario_ids() -
     assert road_result.ok
     assert scenario_result.ok
     assert pool.calls == [(0, "OvertakeRoad", False), (1, "CutIn", True)]
+
+
+def test_project_pool_dry_run_reports_existing_road_without_creating_file(tmp_path) -> None:
+    pool = _RecordingPool()
+    target = tmp_path / "Pool" / "Environment" / "Road" / "City.rd"
+    target.parent.mkdir(parents=True)
+    target.write_text("existing", encoding="utf-8")
+    gateway = object.__new__(ModelDeskAutomationGateway)
+    gateway._dispatcher = _InlineDispatcher()  # type: ignore[attr-defined]
+    gateway._options = ComGatewayOptions()  # type: ignore[attr-defined]
+    gateway._session_id = "test-session"  # type: ignore[attr-defined]
+    gateway._application = SimpleNamespace(  # type: ignore[attr-defined]
+        ActiveProject=SimpleNamespace(WorkingRoot=str(tmp_path), Pool=pool)
+    )
+
+    result = gateway.create_road_network("City", overwrite_existing=True, dry_run=True)
+
+    assert result.ok
+    data = result.to_dict()["data"]
+    assert data["dryRun"] is True
+    assert data["targetPath"] == str(target)
+    assert data["targetExists"] is True
+    assert data["wouldOverwrite"] is True
+    assert pool.calls == []
+
+
+def test_close_project_dry_run_does_not_close_project() -> None:
+    class Project:
+        Name = "Project A"
+
+        def __init__(self) -> None:
+            self.closed = False
+
+        def Close(self, save: bool) -> None:
+            self.closed = True
+
+    project = Project()
+    gateway = object.__new__(ModelDeskAutomationGateway)
+    gateway._dispatcher = _InlineDispatcher()  # type: ignore[attr-defined]
+    gateway._options = ComGatewayOptions()  # type: ignore[attr-defined]
+    gateway._session_id = "test-session"  # type: ignore[attr-defined]
+    gateway._application = SimpleNamespace(ActiveProject=project)  # type: ignore[attr-defined]
+
+    result = gateway.close_project(save=False, dry_run=True)
+
+    assert result.ok
+    details = result.to_dict()["data"]["details"]
+    assert details["dryRun"] == "true"
+    assert details["unsavedChanges"] == "unknown"
+    assert not project.closed

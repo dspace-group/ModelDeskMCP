@@ -171,6 +171,19 @@ def test_service_list_fellow_activities_rejects_invalid_selector() -> None:
     assert len(fake.calls) == 0
 
 
+def test_service_rejects_missing_mutation_target_before_gateway_call() -> None:
+    fake = _FakeGateway()
+    service = _make_service(fake)
+
+    result = service._create_selector("modeldesk_remove_road", "", "0")
+
+    assert isinstance(result, ToolResult)
+    assert not result.ok
+    assert result.error is not None
+    assert result.error.error_type == "validation"
+    assert fake.calls == []
+
+
 def test_service_get_vehicle_object_type_routes_maneuver_index() -> None:
     fake = _FakeGateway()
     service = _make_service(fake)
@@ -357,6 +370,7 @@ def _gateway_for_application(application: Any) -> ModelDeskAutomationGateway:
     return gateway
 
 
+<<<<<<< Updated upstream
 def test_scenario_removal_dry_runs_resolve_targets_without_mutating_collections() -> None:
     fellow = SimpleNamespace(Name="Truck1")
     maneuver = SimpleNamespace(Name="Turn")
@@ -381,6 +395,56 @@ def test_scenario_removal_dry_runs_resolve_targets_without_mutating_collections(
     assert maneuver_preview.to_dict()["data"]["details"]["dryRun"] == "true"
     assert fellows.items == [fellow]
     assert maneuvers.items == [maneuver]
+=======
+def test_scenario_removal_dry_runs_do_not_mutate_or_persist() -> None:
+    events: list[tuple[str, Any]] = []
+
+    class RecordingCollection(_FakeComCollection):
+        def Remove(self, selector: Any) -> bool:
+            events.append(("remove", selector))
+            self.items.pop(selector)
+            return True
+
+    maneuver = SimpleNamespace(Name="Cruise")
+    maneuvers = RecordingCollection([maneuver])
+    fellow = SimpleNamespace(Name="Truck", Sequences=maneuvers)
+    fellows = RecordingCollection([fellow])
+
+    class FakeExperiment:
+        TrafficScenario = SimpleNamespace(Fellows=fellows)
+
+        def Save(self) -> bool:
+            events.append(("save", True))
+            return True
+
+        def Download(self) -> bool:
+            events.append(("download", True))
+            return True
+
+    gateway = _gateway_for_application(
+        SimpleNamespace(ActiveProject=SimpleNamespace(ActiveExperiment=FakeExperiment()))
+    )
+    fellow_preview = gateway.remove_scenario_fellow(
+        Selector.create("name", "Truck"), save=True, download=True, dry_run=True
+    )
+    maneuver_preview = gateway.remove_scenario_maneuver(
+        Selector.create("name", "Truck"),
+        Selector.create("index", "0"),
+        save=True,
+        download=True,
+        dry_run=True,
+    )
+
+    assert fellow_preview.ok
+    assert fellow_preview.to_dict()["data"]["details"]["dryRun"] == "true"
+    assert fellow_preview.to_dict()["data"]["details"]["wouldSave"] == "true"
+    assert maneuver_preview.ok
+    assert maneuver_preview.to_dict()["data"]["details"]["dryRun"] == "true"
+    assert maneuver_preview.to_dict()["data"]["details"]["wouldDownload"] == "true"
+    assert fellows.items == [fellow]
+    assert maneuvers.items == [maneuver]
+    assert events == []
+>>>>>>> Stashed changes
 
 
 class _FakeProfileValue:
@@ -647,8 +711,7 @@ def test_ego_profile_rejects_empty_or_ambiguous_maneuver_sequences(
     )
 
 
-@pytest.mark.parametrize("save_download", (False, True))
-def test_scenario_maneuver_sequence_rejects_reordering_before_persistence(save_download: bool) -> None:
+def test_scenario_maneuver_sequence_verification_does_not_reorder_or_persist() -> None:
     class FakeManeuver:
         __slots__ = ("_index",)
 
@@ -672,7 +735,7 @@ def test_scenario_maneuver_sequence_rejects_reordering_before_persistence(save_d
     )
     gateway = _gateway_for_application(application)
 
-    result = gateway.set_scenario_maneuver_sequence(
+    result = gateway.verify_scenario_maneuver_sequence(
         Selector.active(),
         json.dumps(
             [
@@ -680,13 +743,10 @@ def test_scenario_maneuver_sequence_rejects_reordering_before_persistence(save_d
                 {"selectorKind": "index", "selectorValue": "0"},
             ]
         ),
-        save=save_download,
-        download=save_download,
     )
 
-    assert not result.ok
-    assert result.error is not None
-    assert "reordering is unsupported" in result.error.message.lower()
+    assert result.ok
+    assert result.to_dict()["data"]["details"]["matchesCurrentOrder"] == "false"
     assert [maneuvers.Item(index).Index for index in range(maneuvers.Count)] == [0, 1]
     assert persistence_calls == []
 
@@ -731,17 +791,13 @@ def test_scenario_maneuver_order_never_writes_immutable_index(
         ]
     )
 
-    result = gateway.set_scenario_maneuver_sequence(
+    result = gateway.verify_scenario_maneuver_sequence(
         Selector.active(),
         selector_json,
-        save=False,
-        download=False,
     )
 
-    assert result.ok is should_succeed
-    if not should_succeed:
-        assert result.error is not None
-        assert "reordering is unsupported" in result.error.message.lower()
+    assert result.ok
+    assert result.to_dict()["data"]["details"]["matchesCurrentOrder"] == str(should_succeed).lower()
     assert index_set_attempts == {0: [], 1: []}
     assert [maneuvers.Item(index).Index for index in range(maneuvers.Count)] == [0, 1]
 

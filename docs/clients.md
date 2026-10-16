@@ -84,7 +84,7 @@ With no arguments, the process serves MCP on stdin/stdout. Do not add a metadata
 .\ModelDeskMCP.cmd --list-prompts
 ```
 
-`--list-tools` prints the 83 registered names. Resources and prompts are not registered. Metadata commands do not initialize the ModelDesk runtime. Keep stdout reserved for MCP protocol traffic during a normal stdio session; inspect startup diagnostics in the client log/stderr.
+`--list-tools` prints the 83 registered names. `--list-resources` prints `modeldesk://workflow-catalog`, the static resource containing workflow names and use-case identifiers. No prompts are registered. Metadata commands do not initialize the ModelDesk runtime. Keep stdout reserved for MCP protocol traffic during a normal stdio session; inspect startup diagnostics in the client log/stderr.
 
 ## Server Configuration
 

@@ -16,13 +16,16 @@ def create_app() -> "MCPServer":
     from modeldesk_mcp.config import ComGatewayOptions
     from modeldesk_mcp.domain import ModelDeskService, WorkflowCatalog
     from modeldesk_mcp.tools import register_tools
+    from modeldesk_mcp.tools.resources import register_resources
 
     options = ComGatewayOptions.load_from_environment()
     dispatcher = ComStaDispatcher()
     gateway = ModelDeskAutomationGateway(dispatcher, options)
-    service = ModelDeskService(gateway, WorkflowCatalog())
+    workflows = WorkflowCatalog()
+    service = ModelDeskService(gateway, workflows)
     mcp = MCPServer("ModelDesk Automation")
     register_tools(mcp, service)
+    register_resources(mcp, workflows)
     return mcp
 
 
@@ -58,7 +61,9 @@ def main(argv: list[str] | None = None) -> int | None:
         print(*EXPECTED_TOOL_NAMES, sep="\n")
         return 0
     if args.list_resources:
-        print("No MCP resources are registered.")
+        from modeldesk_mcp.tools.resources import WORKFLOW_CATALOG_URI
+
+        print(WORKFLOW_CATALOG_URI)
         return 0
     if args.list_prompts:
         print("No MCP prompts are registered.")

@@ -8,6 +8,7 @@ import pytest
 from scipy.io import savemat
 
 from modeldesk_mcp.com_bridge.gateway import ModelDeskAutomationGateway
+from modeldesk_mcp.config import ComGatewayOptions
 from modeldesk_mcp.domain.capture_comparison import compare_capture_files
 
 
@@ -50,6 +51,7 @@ def test_compare_capture_files_uses_each_projects_working_root(tmp_path: Path) -
     first = compare_capture_files(first_project, "a.mat", "b.mat", "[]", '{"maximumAbsoluteError": 1.0}')
     second = compare_capture_files(second_project, "a.mat", "b.mat", "[]", '{"maximumAbsoluteError": 1.0}')
 
+    assert first["signalSet"] == {"commonCount": 1, "onlyReferenceCount": 0, "onlyCandidateCount": 0}
     assert first["comparisons"][0]["metrics"]["maximumAbsoluteError"] == pytest.approx(0.5)
     assert first["verdict"] == "passed"
     assert second["comparisons"][0]["metrics"]["maximumAbsoluteError"] == pytest.approx(5.0)
@@ -87,6 +89,22 @@ def test_compare_capture_files_interpolates_candidate_time_raster(tmp_path: Path
     assert result["verdict"] == "passed"
 
 
+def test_compare_capture_files_paginates_comparisons_without_changing_verdict(tmp_path: Path) -> None:
+    _write_capture(tmp_path, "a.mat", (0.0, 1.0, 2.0))
+    _write_capture(tmp_path, "b.mat", (0.0, 1.5, 2.5))
+    signal_specs = f'["{SIGNAL_NAME}","{SIGNAL_NAME}"]'
+
+    first_page = compare_capture_files(tmp_path, "a.mat", "b.mat", signal_specs, "{}", offset=0, limit=1)
+    second_page = compare_capture_files(tmp_path, "a.mat", "b.mat", signal_specs, "{}", offset=1, limit=1)
+
+    assert first_page["comparisonCount"] == 2
+    assert len(first_page["comparisons"]) == 1
+    assert first_page["nextOffset"] == 1
+    assert len(second_page["comparisons"]) == 1
+    assert second_page["nextOffset"] is None
+    assert first_page["verdict"] == second_page["verdict"] == "notEvaluated"
+
+
 def test_compare_capture_files_rejects_nonfinite_metrics_from_finite_samples(tmp_path: Path) -> None:
     _write_capture(tmp_path, "reference.mat", (-1e308, 0.0))
     _write_capture(tmp_path, "candidate.mat", (1e308, 0.0))
@@ -97,6 +115,7 @@ def test_compare_capture_files_rejects_nonfinite_metrics_from_finite_samples(tmp
 
 def test_gateway_uses_active_projects_working_root(tmp_path: Path) -> None:
     gateway = object.__new__(ModelDeskAutomationGateway)
+    gateway._options = ComGatewayOptions()  # type: ignore[attr-defined]
     application = SimpleNamespace(ActiveProject=SimpleNamespace(WorkingRoot=str(tmp_path)))
     received: list[object] = []
     gateway._execute_com = lambda _, callback: callback(application)  # type: ignore[attr-defined, method-assign]
@@ -105,4 +124,4 @@ def test_gateway_uses_active_projects_working_root(tmp_path: Path) -> None:
     result = gateway.compare_captures("a.mat", "b.mat", "[]", "{}")
 
     assert result == {"verdict": "passed"}
-    assert received == [str(tmp_path), "a.mat", "b.mat", "[]", "{}"]
+    assert received == [str(tmp_path), "a.mat", "b.mat", "[]", "{}", 0, 100]

@@ -351,6 +351,46 @@ def test_add_road_object_rejects_position_after_road_length_without_mutation() -
     assert road_objects.Count == 0
 
 
+def test_road_subobject_removal_dry_runs_do_not_mutate_or_persist() -> None:
+    events: list[str] = []
+    segment = SimpleNamespace(ActiveElement=SimpleNamespace(Name="Segment A"))
+    segments = _FakeSegmentCollection([segment])
+    road_object = SimpleNamespace(Name="Sign")
+    road_objects = _FakeRoadObjects([road_object])
+
+    class ConnectionPoint:
+        Type = 1
+
+        def Disconnect(self) -> bool:
+            events.append("disconnect")
+            return True
+
+    connection_point = ConnectionPoint()
+    road = SimpleNamespace(
+        Name="Road",
+        Length=100.0,
+        Segments=segments,
+        Objects=road_objects,
+        ConnectionPoints=_FakeCollection([connection_point]),
+    )
+    gateway = _gateway_with_active_road(road)
+    selector = Selector.create("index", "0")
+
+    segment_preview = gateway.remove_road_segment(selector, 0, save=True, download=True, dry_run=True)
+    object_preview = gateway.remove_road_object(selector, 0, save=True, download=True, dry_run=True)
+    disconnect_preview = gateway.disconnect_road(selector, "End", save=True, download=True, dry_run=True)
+
+    assert segment_preview.ok
+    assert segment_preview.to_dict()["data"]["details"]["dryRun"] == "true"
+    assert object_preview.ok
+    assert object_preview.to_dict()["data"]["details"]["dryRun"] == "true"
+    assert disconnect_preview.ok
+    assert disconnect_preview.to_dict()["data"]["details"]["wouldSave"] == "true"
+    assert segments.items == [segment]
+    assert road_objects.items == [road_object]
+    assert events == []
+
+
 def test_connect_roads_maps_end_to_start_and_invokes_move_connection() -> None:
     source_start = _FakeConnectionPoint(0)
     source_end = _FakeConnectionPoint(1)
@@ -430,6 +470,16 @@ def test_road_crud_save_download_and_save_as_use_active_network(tmp_path) -> Non
     added = gateway.add_road("Created", 1, 1, 3.5, save=True, download=True)
     listed = gateway.list_roads()
     renamed = gateway.update_road(Selector.create("index", "0"), "Renamed", save=False, download=False)
+    preview_path = tmp_path / "existing-road-network.rd"
+    preview_path.write_text("existing", encoding="utf-8")
+    preview = gateway.save_road_network_as(str(preview_path), overwrite_existing=True, dry_run=True)
+    assert preview.ok
+    preview_details = preview.to_dict()["data"]["details"]
+    assert preview_details["dryRun"] == "true"
+    assert preview_details["targetExists"] == "true"
+    assert preview_details["wouldOverwrite"] == "true"
+    assert road_network.save_as_call is None
+
     save_as_path = tmp_path / "road-network.rd"
     saved_as = gateway.save_road_network_as(str(save_as_path), overwrite_existing=False)
 
@@ -440,11 +490,25 @@ def test_road_crud_save_download_and_save_as_use_active_network(tmp_path) -> Non
     assert saved_as.ok
     assert road_network.save_as_call == (str(save_as_path.resolve()), False)
 
+<<<<<<< Updated upstream
     preview = gateway.remove_road(Selector.create("index", "0"), save=False, download=False, dry_run=True)
 
     assert preview.ok
     assert preview.to_dict()["data"]["details"]["dryRun"] == "true"
     assert road_network.Roads.Count == 1
+=======
+    calls_before_preview = list(persistence_calls)
+    roads_before_preview = road_network.Roads.Count
+    removal_preview = gateway.remove_road(Selector.create("index", "0"), save=True, download=True, dry_run=True)
+
+    assert removal_preview.ok
+    preview_details = removal_preview.to_dict()["data"]["details"]
+    assert preview_details["dryRun"] == "true"
+    assert preview_details["wouldSave"] == "true"
+    assert preview_details["wouldDownload"] == "true"
+    assert road_network.Roads.Count == roads_before_preview
+    assert persistence_calls == calls_before_preview
+>>>>>>> Stashed changes
 
     removed = gateway.remove_road(Selector.create("index", "0"), save=False, download=False)
 

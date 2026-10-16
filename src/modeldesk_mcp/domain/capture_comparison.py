@@ -17,6 +17,7 @@ from scipy.io import loadmat
 
 MEASUREMENTS_RELATIVE_PATH = Path("Pool") / "Simulation" / "Measurements"
 MAX_CAPTURE_FILE_SIZE_BYTES = 512 * 1024 * 1024
+MAX_COMPARISON_PAGE_SIZE = 500
 TOLERANCE_KEYS = ("meanAbsoluteError", "rootMeanSquaredError", "maximumAbsoluteError")
 
 
@@ -26,6 +27,8 @@ def compare_capture_files(
     candidate_capture: str,
     signal_specs_json: str,
     tolerances_json: str,
+    offset: int = 0,
+    limit: int = 100,
 ) -> dict[str, Any]:
     """Compare two project-local captures and return finite metrics or ``ValueError``.
 
@@ -34,28 +37,35 @@ signal and tolerance JSON is validated before a result is returned. This functio
 performs read-only filesystem access and never writes captures or project state.
 """
 
+    if offset < 0:
+        raise ValueError("Comparison offset must not be negative.")
+    if limit < 1 or limit > MAX_COMPARISON_PAGE_SIZE:
+        raise ValueError(f"Comparison limit must be between 1 and {MAX_COMPARISON_PAGE_SIZE}.")
     measurements_directory = Path(working_root).resolve() / MEASUREMENTS_RELATIVE_PATH
     reference = _load_capture(_resolve_capture_path(measurements_directory, reference_capture))
     candidate = _load_capture(_resolve_capture_path(measurements_directory, candidate_capture))
     signal_pairs = _parse_signal_specs(signal_specs_json, reference["signals"], candidate["signals"])
     tolerances = _parse_tolerances(tolerances_json)
-    comparisons = tuple(
+    all_comparisons = tuple(
         _compare_signal(reference, candidate, reference_name, candidate_name, tolerances)
         for reference_name, candidate_name in signal_pairs
     )
-    evaluated = tuple(item["withinTolerance"] for item in comparisons if item["withinTolerance"] is not None)
+    evaluated = tuple(item["withinTolerance"] for item in all_comparisons if item["withinTolerance"] is not None)
     verdict = "notEvaluated" if not evaluated else "passed" if all(evaluated) else "failed"
     reference_names = set(reference["signals"])
     candidate_names = set(candidate["signals"])
+    end_offset = min(len(all_comparisons), offset + limit)
     return {
         "referenceCapture": _capture_summary(reference_capture, reference),
         "candidateCapture": _capture_summary(candidate_capture, candidate),
         "signalSet": {
-            "common": sorted(reference_names & candidate_names),
-            "onlyReference": sorted(reference_names - candidate_names),
-            "onlyCandidate": sorted(candidate_names - reference_names),
+            "commonCount": len(reference_names & candidate_names),
+            "onlyReferenceCount": len(reference_names - candidate_names),
+            "onlyCandidateCount": len(candidate_names - reference_names),
         },
-        "comparisons": comparisons,
+        "comparisons": all_comparisons[offset:end_offset],
+        "comparisonCount": len(all_comparisons),
+        "nextOffset": end_offset if end_offset < len(all_comparisons) else None,
         "verdict": verdict,
     }
 

@@ -7,7 +7,7 @@ description: Use when an agent operates the local ModelDesk MCP server to inspec
 
 ## When to use
 
-Use this skill when an agent needs to operate the ModelDesk MCP server through its local stdio interface. It describes the safe order for discovery, selection, mutation, verification, persistence, execution, and cleanup. The server exposes tools only; it does not imply MCP resources, MCP prompts, dynamic discovery, or a graphical client.
+Use this skill when an agent needs to operate the ModelDesk MCP server through its local stdio interface. It describes the safe order for discovery, selection, mutation, verification, persistence, execution, and cleanup. The server exposes tools and the static `modeldesk://workflow-catalog` resource; it exposes no prompts or dynamic tool discovery and does not imply a graphical client.
 
 ## Preflight: status and capability
 
@@ -158,8 +158,13 @@ When registered tools change, update the guidance below and run `uv run python t
 | `modeldesk_remove_scenario_fellow` | Remove selected fellow from active scenario; `dryRun=true` previews the target. Both `selectorKind="index"` and `selectorKind="name"` are resolved reliably (name is translated to the fellow's collection index internally). |
 | `modeldesk_add_scenario_maneuver` | Add maneuver to active scenario scope (ego) or selected fellow scope. Fellow scope resolves through `Fellow.Sequences`; both ego/active and fellow scope are reliable. |
 | `modeldesk_update_scenario_maneuver` | Update selected maneuver using `propertiesJson` on ego or fellow scope. Both ego/active and fellow scope are reliable. |
+<<<<<<< Updated upstream
 | `modeldesk_remove_scenario_maneuver` | Remove selected maneuver from ego or selected fellow scope; `dryRun=true` previews the target. Both ego/active and fellow scope are reliable. |
 | `modeldesk_set_scenario_maneuver_sequence` | Set maneuver execution order using selector array JSON for ego or fellow scope. Both ego/active and fellow scope are reliable. |
+=======
+| `modeldesk_remove_scenario_maneuver` | Remove selected maneuver from ego or selected fellow scope. Both ego/active and fellow scope are reliable. |
+| `modeldesk_verify_scenario_maneuver_sequence` | Compare a requested sequence with the current immutable order; returns `matchesCurrentOrder` and never reorders, saves, or downloads. |
+>>>>>>> Stashed changes
 | `modeldesk_set_maneuver_behavior_profiles` | Set longitudinal/lateral behavior profile JSON on selected maneuver. Both ego/active and fellow scope are reliable. |
 | `modeldesk_get_scenario_road` | Read currently referenced road for the active scenario. |
 | `modeldesk_set_scenario_road` | Set scenario road reference by road name after validating available roads. |

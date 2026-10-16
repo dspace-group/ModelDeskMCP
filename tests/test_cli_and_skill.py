@@ -50,7 +50,7 @@ def test_windows_launcher_resolves_uv_and_preserves_exit_code(
     ("arguments", "expected"),
     (
         (("--version",), f"modeldesk-mcp {__version__}"),
-        (("--list-resources",), "No MCP resources are registered."),
+        (("--list-resources",), "modeldesk://workflow-catalog"),
         (("--list-prompts",), "No MCP prompts are registered."),
     ),
 )

@@ -13,6 +13,11 @@ class WorkflowCatalog:
     def __init__(self) -> None:
         self._session_id = uuid.uuid4().hex
 
+    def list_workflow_plans(self) -> tuple[WorkflowPlan, ...]:
+        """Return all registered dry-run recipes in stable name order."""
+
+        return tuple(_WORKFLOW_FACTORIES[name]() for name in sorted(_WORKFLOW_FACTORIES))
+
     def get_workflow_plan(self, workflow_name: str) -> ToolResult:
         """Return a registered workflow plan by name."""
 
@@ -121,7 +126,7 @@ def _create_scenario_plan() -> WorkflowPlan:
         "modeldesk_add_scenario_maneuver",
         "modeldesk_update_scenario_maneuver",
         "modeldesk_remove_scenario_maneuver",
-        "modeldesk_set_scenario_maneuver_sequence",
+        "modeldesk_verify_scenario_maneuver_sequence",
         "modeldesk_set_maneuver_behavior_profiles",
         "modeldesk_start_maneuver",
         "modeldesk_stop_maneuver",

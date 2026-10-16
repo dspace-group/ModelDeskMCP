@@ -39,7 +39,7 @@ Planning stays in the local catalog. A workflow plan describes lower-level calls
 
 ## Public Contract
 
-The registry exposes exactly 83 explicit `modeldesk_` names. Tools are not discovered from arbitrary source files at runtime. No MCP resources or prompts are registered.
+The registry exposes exactly 83 explicit `modeldesk_` names. Tools are not discovered from arbitrary source files at runtime. The server also registers the static `modeldesk://workflow-catalog` resource for workflow and use-case discovery; no MCP prompts are registered.
 
 MCPServer receives SDK-supported `Annotated`/`Field` parameter metadata and a typed output envelope. MCP validation and typed request validation complement each other: the former describes outer arguments, while the latter checks JSON payloads and domain-specific constraints.
 

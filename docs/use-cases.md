@@ -155,7 +155,7 @@ Verify `data.details.longitudinalPosition` or `data.details.longitudinalVelocity
 
 ### Ordering and References
 
-`modeldesk_set_scenario_maneuver_sequence` can confirm an already-matching order. It rejects a changed order before Save/Download because the interface exposes immutable maneuver indices and no verified reorder member. Do not rewrite indices or recreate existing content as an implicit workaround.
+`modeldesk_verify_scenario_maneuver_sequence` compares a requested order with the current immutable maneuver indices and returns `matchesCurrentOrder`. It is read-only and never saves or downloads. The interface cannot reorder maneuvers; do not rewrite indices or recreate existing content as an implicit workaround.
 
 Scenario-road identity fields can be null, and selectable vehicle-type lists can contain placeholder labels. Check the setter result and relevant live context instead of inventing paths or declaring those fields verified.
 

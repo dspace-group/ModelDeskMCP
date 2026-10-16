@@ -99,7 +99,7 @@ TOOL_USE_CASES: dict[str, tuple[str, ...]] = {
     "modeldesk_add_scenario_maneuver": (UC3,),
     "modeldesk_update_scenario_maneuver": (UC3,),
     "modeldesk_remove_scenario_maneuver": (UC3,),
-    "modeldesk_set_scenario_maneuver_sequence": (UC3,),
+    "modeldesk_verify_scenario_maneuver_sequence": (UC3,),
     "modeldesk_set_maneuver_behavior_profiles": (UC3,),
     "modeldesk_get_scenario_road": (UC3,),
     "modeldesk_set_scenario_road": (UC3,),

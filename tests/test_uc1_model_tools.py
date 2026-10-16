@@ -24,8 +24,8 @@ class _FakeGateway:
         self.calls = []
         self.session_id = "test-session"
 
-    def get_active_model_info(self):
-        self.calls.append(("get_active_model_info",))
+    def get_active_model_info(self, offset=0):
+        self.calls.append(("get_active_model_info", offset))
         return type("R", (), {"ok": True})()
 
     def set_active_model(self, model_file_path, ml_working_directory, initialization_command, platform_name):
@@ -45,7 +45,7 @@ def test_service_get_active_model_info_routes_to_gateway() -> None:
     fake = _FakeGateway()
     service = _make_service(fake)
     service.get_active_model_info()
-    assert fake.calls == [("get_active_model_info",)]
+    assert fake.calls == [("get_active_model_info", 0)]
 
 
 def test_service_set_active_model_routes_to_gateway() -> None:

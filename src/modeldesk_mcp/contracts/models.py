@@ -198,6 +198,12 @@ class ProjectPoolFileCreationInfo:
     created_path: str | None
     created_type_name: str | None
     message: str
+    dry_run: bool = False
+    target_path: str | None = None
+    target_exists: bool | None = None
+    would_overwrite: bool | None = None
+    would_fail_if_executed: bool | None = None
+    target_path_candidates: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

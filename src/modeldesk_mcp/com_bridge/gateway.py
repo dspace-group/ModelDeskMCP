@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from pathlib import Path
+import json
 import math
 import platform
 import sys
@@ -116,15 +117,20 @@ class ModelDeskAutomationGateway:
             traffic_objects = _get_first_available_property(manager, "TrafficObjects", "Objects")
             obj = com.resolve_item(traffic_objects, selector)
             object_id = com.get_first_string_property(obj, "ObjectID", "Name", "CompleteName")
+<<<<<<< Updated upstream
             if dry_run:
                 return _dry_run_preview(
                     "modeldesk_remove_traffic_object",
                     {"objectId": object_id, "selectorKind": selector.by.value, "selectorValue": selector.value},
                 )
+=======
+            details = {"objectId": object_id, "selectorKind": selector.by.value, "selectorValue": selector.value}
+            if dry_run:
+                return _dry_run_preview("modeldesk_remove_traffic_object", details)
+>>>>>>> Stashed changes
             result = com.invoke_method(manager, "RemoveTrafficObject", object_id)
             if isinstance(result, bool) and not result:
                 raise RuntimeError("Traffic object removal returned false.")
-            details = {"objectId": object_id, "selectorKind": selector.by.value, "selectorValue": selector.value}
             return OperationInfo("modeldesk_remove_traffic_object", True, "Traffic object removed.", details)
 
         return self._execute_com("modeldesk_remove_traffic_object", operation)
@@ -152,15 +158,20 @@ class ModelDeskAutomationGateway:
             folders = _get_required_property(manager, "Folders")
             folder = com.resolve_item(folders, selector)
             folder_name = com.get_first_string_property(folder, "Name", "CompleteName")
+<<<<<<< Updated upstream
             if dry_run:
                 return _dry_run_preview(
                     "modeldesk_remove_traffic_object_folder",
                     {"folderName": folder_name, "selectorKind": selector.by.value, "selectorValue": selector.value},
                 )
+=======
+            details = {"folderName": folder_name, "selectorKind": selector.by.value, "selectorValue": selector.value}
+            if dry_run:
+                return _dry_run_preview("modeldesk_remove_traffic_object_folder", details)
+>>>>>>> Stashed changes
             result = com.invoke_method(manager, "RemoveFolder", folder_name)
             if isinstance(result, bool) and not result:
                 raise RuntimeError("Traffic object folder removal returned false.")
-            details = {"folderName": folder_name, "selectorKind": selector.by.value, "selectorValue": selector.value}
             return OperationInfo("modeldesk_remove_traffic_object_folder", True, "Traffic object folder removed.", details)
 
         return self._execute_com("modeldesk_remove_traffic_object_folder", operation)
@@ -208,32 +219,32 @@ class ModelDeskAutomationGateway:
 
         return self._execute_com("modeldesk_open_project", operation)
 
-    def create_project_pool_file(self, file_type: str | None, name: str, overwrite_existing: bool) -> ToolResult:
+    def create_project_pool_file(self, file_type: str | None, name: str, overwrite_existing: bool, dry_run: bool = False) -> ToolResult:
         """Create a project-pool file through ActiveProject.Pool.CreateFile."""
 
         try:
             request = ProjectPoolFileCreationRequest.create(file_type, name, overwrite_existing)
         except ValueError as exception:
             return self._validation_failure("modeldesk_create_project_pool_file", public_error_message(exception))
-        return self._execute_com("modeldesk_create_project_pool_file", lambda application: self._create_project_pool_file_core(application, request))
+        return self._execute_com("modeldesk_create_project_pool_file", lambda application: self._create_project_pool_file_core(application, request, dry_run))
 
-    def create_road_network(self, name: str, overwrite_existing: bool) -> ToolResult:
+    def create_road_network(self, name: str, overwrite_existing: bool, dry_run: bool = False) -> ToolResult:
         """Create a RoadNetwork file through ActiveProject.Pool.CreateFile."""
 
         try:
             request = ProjectPoolFileCreationRequest.create(ProjectPoolFileType.ROAD_NETWORK, name, overwrite_existing)
         except ValueError as exception:
             return self._validation_failure("modeldesk_create_road_network", public_error_message(exception))
-        return self._execute_com("modeldesk_create_road_network", lambda application: self._create_project_pool_file_core(application, request))
+        return self._execute_com("modeldesk_create_road_network", lambda application: self._create_project_pool_file_core(application, request, dry_run))
 
-    def create_traffic_scenario(self, name: str, overwrite_existing: bool) -> ToolResult:
+    def create_traffic_scenario(self, name: str, overwrite_existing: bool, dry_run: bool = False) -> ToolResult:
         """Create a Traffic Scenario file through ActiveProject.Pool.CreateFile."""
 
         try:
             request = ProjectPoolFileCreationRequest.create(ProjectPoolFileType.TRAFFIC_SCENARIO, name, overwrite_existing)
         except ValueError as exception:
             return self._validation_failure("modeldesk_create_traffic_scenario", public_error_message(exception))
-        return self._execute_com("modeldesk_create_traffic_scenario", lambda application: self._create_project_pool_file_core(application, request))
+        return self._execute_com("modeldesk_create_traffic_scenario", lambda application: self._create_project_pool_file_core(application, request, dry_run))
 
     def list_environment_pool_items(self, group: str | None, recursive: bool, offset: int = 0) -> ToolResult:
         """List files in one active-project Environment Pool group."""
@@ -308,14 +319,14 @@ class ModelDeskAutomationGateway:
 
         return self._execute_com("modeldesk_activate_parameter_set", operation)
 
-    def get_active_model_info(self) -> ToolResult:
+    def get_active_model_info(self, offset: int = 0) -> ToolResult:
         """Read active model information in the active experiment."""
 
         def operation(application: Any) -> DomainSummary:
             models = _get_required_property(_get_active_experiment(application), "Models")
             active_model_info = _get_required_property(models, "ActiveModelInfo")
             properties = _read_model_info_properties(active_model_info)
-            return self._create_object_summary("parameterization.activeModel", active_model_info, properties)
+            return self._create_object_summary("parameterization.activeModel", active_model_info, properties, offset=offset)
 
         return self._execute_com("modeldesk_get_active_model_info", operation)
 
@@ -387,10 +398,10 @@ class ModelDeskAutomationGateway:
 
         return self._execute_com("modeldesk_set_parameter_value", operation)
 
-    def get_domain_summary(self, domain: ModelDeskDomain, operation_name: str) -> ToolResult:
+    def get_domain_summary(self, domain: ModelDeskDomain, operation_name: str, offset: int = 0) -> ToolResult:
         """Return a COM-backed domain summary."""
 
-        return self._execute_com(operation_name, lambda application: self._get_domain_summary_core(application, domain))
+        return self._execute_com(operation_name, lambda application: self._get_domain_summary_core(application, domain, offset))
 
     def activate_road(self, selector: Selector) -> ToolResult:
         """Activate a road or RoadNetwork by selector."""
@@ -410,16 +421,27 @@ class ModelDeskAutomationGateway:
             lambda application: self._create_collection_summary("roads.roads", _get_required_property(_get_active_road_network(application), "Roads"), "road", offset),
         )
 
-    def save_road_network_as(self, file_name: str, overwrite_existing: bool) -> ToolResult:
+    def save_road_network_as(self, file_name: str, overwrite_existing: bool, dry_run: bool = False) -> ToolResult:
         """Save the active road network to an absolute .rd path."""
 
         try:
-            normalized_file_name = _normalize_road_network_file_name(file_name, overwrite_existing)
+            normalized_file_name = _normalize_road_network_file_name(file_name, overwrite_existing, allow_existing=dry_run)
         except (ValueError, OSError) as exception:
             return self._validation_failure("modeldesk_save_road_network_as", public_error_message(exception))
 
         def operation(application: Any) -> OperationInfo:
             road_network = _get_active_road_network(application)
+            if dry_run:
+                target_exists = Path(normalized_file_name).exists()
+                details = {
+                    "fileName": normalized_file_name,
+                    "targetExists": str(target_exists).lower(),
+                    "overwriteExisting": str(overwrite_existing).lower(),
+                    "wouldOverwrite": str(target_exists and overwrite_existing).lower(),
+                    "wouldFailIfExecuted": str(target_exists and not overwrite_existing).lower(),
+                    "dryRun": "true",
+                }
+                return OperationInfo("modeldesk_save_road_network_as", True, "Dry-run preview; no file was written.", details)
             com.invoke_method(road_network, "SaveAs", normalized_file_name, overwrite_existing)
             details = {"fileName": normalized_file_name, "overwriteExisting": str(overwrite_existing)}
             return OperationInfo("modeldesk_save_road_network_as", True, "Active road network saved to file.", details)
@@ -647,43 +669,38 @@ class ModelDeskAutomationGateway:
 
         return self._execute_com("modeldesk_remove_scenario_maneuver", operation)
 
-    def set_scenario_maneuver_sequence(self, fellow_selector: Selector, maneuver_selectors_json: str, save: bool, download: bool) -> ToolResult:
-        """Confirm an existing order or report that reordering is unsupported.
-
-        The verified automation interface exposes an immutable maneuver Index
-        and no reorder member. This method never writes ordering properties:
-        changed order fails before persistence, while a matching order is a no-op.
-        """
+    def verify_scenario_maneuver_sequence(self, fellow_selector: Selector, maneuver_selectors_json: str) -> ToolResult:
+        """Compare the requested maneuver order with the current immutable order."""
 
         def operation(application: Any) -> OperationInfo:
             maneuver_selectors = parse_selector_array_json(maneuver_selectors_json, "maneuverSelectorsJson")
             if len(maneuver_selectors) == 0:
                 raise ValueError("At least one maneuver selector is required.")
             maneuvers = _get_scenario_maneuvers_collection(application, fellow_selector)
-            for sequence_index, selector in enumerate(maneuver_selectors):
-                current_maneuver = _invoke_required_item(maneuvers, sequence_index, "maneuver")
+            current_indices = [
+                _read_int_property(_invoke_required_item(maneuvers, index, "maneuver"), "Index")
+                for index in range(com.get_count(maneuvers))
+            ]
+            requested_indices: list[int] = []
+            for selector in maneuver_selectors:
                 requested_maneuver = com.resolve_item(maneuvers, selector)
-                current_index = _read_int_property(current_maneuver, "Index")
-                requested_index = _read_int_property(requested_maneuver, "Index")
-                if requested_index != current_index:
-                    raise RuntimeError(
-                        "Reordering is unsupported: the verified automation interface exposes only immutable "
-                        "Maneuver.Index and no reorder member."
-                    )
+                requested_indices.append(_read_int_property(requested_maneuver, "Index"))
+            matches_current_order = requested_indices == current_indices
             details = {
                 "fellowSelectorKind": fellow_selector.by.value,
                 "fellowSelectorValue": fellow_selector.value,
-                "assignedCount": "0",
+                "currentIndices": json.dumps(current_indices, separators=(",", ":")),
+                "requestedIndices": json.dumps(requested_indices, separators=(",", ":")),
+                "matchesCurrentOrder": str(matches_current_order).lower(),
             }
-            _apply_scenario_save_download(application, save, download, details)
             return OperationInfo(
-                "modeldesk_set_scenario_maneuver_sequence",
+                "modeldesk_verify_scenario_maneuver_sequence",
                 True,
-                "Requested maneuver order already matches the current order; no reorder was applied.",
+                "Requested maneuver order matches the current order." if matches_current_order else "Requested maneuver order does not match the current order; no mutation was performed.",
                 details,
             )
 
-        return self._execute_com("modeldesk_set_scenario_maneuver_sequence", operation)
+        return self._execute_com("modeldesk_verify_scenario_maneuver_sequence", operation)
 
     def set_maneuver_behavior_profiles(self, fellow_selector: Selector, maneuver_selector: Selector, longitudinal_profile_json: str | None, lateral_profile_json: str | None, save: bool, download: bool) -> ToolResult:
         """Apply and verify ego sequence or fellow profile values before persistence.
@@ -941,14 +958,14 @@ class ModelDeskAutomationGateway:
             return self._validation_failure("modeldesk_validate_traffic_object_reference", "Traffic object reference validation requires index, name, path, completeName, or id.")
         return self._execute_com("modeldesk_validate_traffic_object_reference", lambda application: self._validate_traffic_object_reference_core(application, selector))
 
-    def get_processing_configuration(self) -> ToolResult:
+    def get_processing_configuration(self, offset: int = 0) -> ToolResult:
         """Return processing configuration details."""
 
         def operation(application: Any) -> DomainSummary:
             processing = _get_active_parameter_set_processing(application)
             configuration = _get_required_property(processing, "Configuration")
             properties = com.read_properties(configuration, "Name", "TypeName", "Path")
-            return self._create_object_summary("processing.configuration", configuration, properties, "Inputs", "Mappings", "MeasurementFiles", "Files", "Parameters")
+            return self._create_object_summary("processing.configuration", configuration, properties, "Inputs", "Mappings", "MeasurementFiles", "Files", "Parameters", offset=offset)
 
         return self._execute_com("modeldesk_get_processing_configuration", operation)
 
@@ -1031,6 +1048,8 @@ class ModelDeskAutomationGateway:
         candidate_capture: str,
         signal_specs_json: str,
         tolerances_json: str,
+        offset: int = 0,
+        limit: int = 100,
     ) -> ToolResult:
         """Compare two MATLAB captures from the active project's measurement pool."""
 
@@ -1045,6 +1064,8 @@ class ModelDeskAutomationGateway:
                 candidate_capture,
                 signal_specs_json,
                 tolerances_json,
+                offset,
+                min(limit, self._options.max_collection_items),
             )
 
         return self._execute_com("modeldesk_compare_captures", operation)
@@ -1191,8 +1212,40 @@ class ModelDeskAutomationGateway:
             active_experiment_name = com.get_first_string_property(active_experiment, "Name", "CompleteName")
         return ProjectInfo(True, com.get_first_string_property(project, "Name", "ProjectName"), com.get_string_property(project, "WorkingRoot"), active_experiment_name)
 
-    def _create_project_pool_file_core(self, application: Any, request: ProjectPoolFileCreationRequest) -> ProjectPoolFileCreationInfo:
+    def _create_project_pool_file_core(self, application: Any, request: ProjectPoolFileCreationRequest, dry_run: bool = False) -> ProjectPoolFileCreationInfo:
         project = _get_active_project(application)
+        if dry_run:
+            working_root = com.get_string_property(project, "WorkingRoot")
+            if working_root is None or working_root.strip() == "":
+                raise RuntimeError("Application.ActiveProject.WorkingRoot is not available for a project-pool dry-run.")
+            target_path, target_exists, candidates = _project_pool_preview_target(Path(working_root), request)
+            would_overwrite = None if target_exists is None else target_exists and request.overwrite_existing
+            would_fail = None if target_exists is None else target_exists and not request.overwrite_existing
+            if target_exists is None:
+                message = "Dry-run preview; no file was written. The COM API does not expose this file type's destination path."
+            elif target_exists and request.overwrite_existing:
+                message = "Dry-run preview; the existing target would be overwritten if executed."
+            elif target_exists:
+                message = "Dry-run preview; the target exists and execution would fail unless overwriteExisting is enabled."
+            else:
+                message = "Dry-run preview; the target does not exist and no file was written."
+            return ProjectPoolFileCreationInfo(
+                request.file_type.display_name,
+                request.to_com_type(),
+                request.name,
+                request.expected_extension(),
+                request.overwrite_existing,
+                None,
+                None,
+                None,
+                message,
+                True,
+                target_path,
+                target_exists,
+                would_overwrite,
+                would_fail,
+                candidates,
+            )
         pool = _get_required_property(project, "Pool")
         created_file = com.invoke_method(pool, "CreateFile", request.to_com_type(), request.name, request.overwrite_existing)
         if isinstance(created_file, bool) and not created_file:
@@ -1231,7 +1284,14 @@ class ModelDeskAutomationGateway:
             message = f"Environment Pool group directory '{group_path}' does not exist."
             return DomainSummary(request.domain_name(), False, 0, (), properties, message)
         file_paths, total_count, next_offset = _enumerate_environment_pool_files(group_path, request, max_items, offset)
+<<<<<<< Updated upstream
         items = tuple(ItemSummary(index, _environment_pool_item_name(group_path, path), request.item_kind(), str(path)) for index, path in enumerate(file_paths, start=offset))
+=======
+        items = tuple(
+            ItemSummary(index, _environment_pool_item_name(group_path, path), request.item_kind(), str(path))
+            for index, path in enumerate(file_paths, start=offset)
+        )
+>>>>>>> Stashed changes
         properties["matchedItemCount"] = str(total_count)
         properties["pageItemCount"] = str(len(items))
         properties["truncated"] = str(next_offset is not None)
@@ -1244,33 +1304,33 @@ class ModelDeskAutomationGateway:
         operation = "modeldesk_save_project" if method_name == "Save" else method_name
         return OperationInfo(operation, True, message)
 
-    def _get_domain_summary_core(self, application: Any, domain: ModelDeskDomain) -> DomainSummary:
+    def _get_domain_summary_core(self, application: Any, domain: ModelDeskDomain, offset: int = 0) -> DomainSummary:
         if domain == ModelDeskDomain.EXPERIMENTS:
-            return self._create_collection_summary("experiments", _get_required_property(_get_active_project(application), "Experiments"), "experiment")
+            return self._create_collection_summary("experiments", _get_required_property(_get_active_project(application), "Experiments"), "experiment", offset)
         if domain == ModelDeskDomain.PARAMETERIZATION:
             active_parameter_set = _get_required_property(_get_active_experiment(application), "ActiveParameterSet")
             properties = com.read_properties(active_parameter_set, "Name")
-            return self._create_object_summary("parameterization", active_parameter_set, properties, "MainComponents", "ParameterSetProcessing")
+            return self._create_object_summary("parameterization", active_parameter_set, properties, "MainComponents", "ParameterSetProcessing", offset=offset)
         if domain == ModelDeskDomain.ROADS:
             road = _get_required_property(_get_active_experiment(application), "Road")
-            return self._create_object_summary("roads", road, com.read_properties(road, "Name", "FileName", "Path"), "Roads", "Segments", "Lanes", "RoadTrafficObjects")
+            return self._create_object_summary("roads", road, com.read_properties(road, "Name", "FileName", "Path"), "Roads", "Segments", "Lanes", "RoadTrafficObjects", offset=offset)
         if domain == ModelDeskDomain.SCENARIOS:
             scenario = _get_required_property(_get_active_experiment(application), "TrafficScenario")
-            return self._create_object_summary("scenarios", scenario, com.read_properties(scenario, "Name", "Author", "Comment"), "Fellows", "Maneuver", "Maneuvers")
+            return self._create_object_summary("scenarios", scenario, com.read_properties(scenario, "Name", "Author", "Comment"), "Fellows", "Maneuver", "Maneuvers", offset=offset)
         if domain == ModelDeskDomain.TRAFFIC_OBJECTS:
             manager = _get_required_property(_get_active_project(application), "TrafficObjectManager")
-            return self._create_object_summary("trafficObjects", manager, com.read_properties(manager, "Name"), "TrafficObjects", "Objects", "Folders")
+            return self._create_object_summary("trafficObjects", manager, com.read_properties(manager, "Name"), "TrafficObjects", "Objects", "Folders", offset=offset)
         if domain == ModelDeskDomain.PROCESSING:
             processing = _get_active_parameter_set_processing(application)
-            return self._create_object_summary("processing", processing, com.read_properties(processing, "Name"), "Configuration")
+            return self._create_object_summary("processing", processing, com.read_properties(processing, "Name"), "Configuration", offset=offset)
         if domain == ModelDeskDomain.TESTING:
             test = _get_required_property(_get_active_experiment(application), "Test")
-            return self._create_object_summary("testing", test, com.read_properties(test, "Name", "Verdict"), "LogicalTestCases", "ConcreteTestCases")
+            return self._create_object_summary("testing", test, com.read_properties(test, "Name", "Verdict"), "LogicalTestCases", "ConcreteTestCases", offset=offset)
         if domain == ModelDeskDomain.PLOTTING:
-            return self._create_plotting_summary(application)
+            return self._create_plotting_summary(application, offset)
         raise ValueError(f"Domain '{domain.value}' is not a COM-backed summary domain.")
 
-    def _create_plotting_summary(self, application: Any) -> DomainSummary:
+    def _create_plotting_summary(self, application: Any, offset: int = 0) -> DomainSummary:
         plotting = _get_active_plotting(application)
         properties = com.read_properties(plotting, "Name")
         nested_collections = (
@@ -1287,8 +1347,9 @@ class ModelDeskAutomationGateway:
                 properties[f"collection.{label}.count"] = str(com.snapshot_collection(collection, label, self._options.max_collection_items).count)
             except Exception as exception:  # noqa: BLE001 - records late-bound collection failures.
                 properties[f"collection.{label}.error"] = public_error_message(exception)
-        item = ItemSummary(0, com.read_display_name(plotting, "plotting", 0), com.get_string_property(plotting, "TypeName"), com.get_string_property(plotting, "Path"))
-        return DomainSummary("plotting", True, 1, (item,), properties)
+        item = ItemSummary(offset, com.read_display_name(plotting, "plotting", 0), com.get_string_property(plotting, "TypeName"), com.get_string_property(plotting, "Path"))
+        page_items = (item,) if offset == 0 else ()
+        return DomainSummary("plotting", True, 1, page_items, properties)
 
     def _get_parameter_value_core(self, application: Any, parameter_path: str) -> ParameterValueInfo:
         parameter = self._find_parameter(application, parameter_path)
@@ -1590,7 +1651,11 @@ class ModelDeskAutomationGateway:
     def _create_collection_summary(self, domain: str, collection: Any, item_kind: str, offset: int = 0) -> DomainSummary:
         snapshot = com.snapshot_collection(collection, item_kind, self._options.max_collection_items, offset)
         properties = com.read_properties(collection, "Name", "TypeName")
+<<<<<<< Updated upstream
         message = f"Result was truncated to {self._options.max_collection_items} items." if snapshot.is_truncated else None
+=======
+        message = f"More items available; request offset {snapshot.next_offset}." if snapshot.is_truncated else None
+>>>>>>> Stashed changes
         return DomainSummary(domain, True, snapshot.count, snapshot.items, properties, message, snapshot.next_offset)
 
     def _create_first_available_collection_summary(self, domain: str, instance: Any, item_kind: str, *property_candidates: str, offset: int = 0) -> DomainSummary:
@@ -1610,21 +1675,21 @@ class ModelDeskAutomationGateway:
         message = f"None of the expected COM collection properties could be summarized: {', '.join(property_candidates)}."
         return DomainSummary(domain, False, 0, (), properties, message)
 
-    def _create_object_summary(self, domain: str, instance: Any, properties: dict[str, str | None], *collection_property_candidates: str) -> DomainSummary:
+    def _create_object_summary(self, domain: str, instance: Any, properties: dict[str, str | None], *collection_property_candidates: str, offset: int = 0) -> DomainSummary:
         for property_name in collection_property_candidates:
             has_collection, collection = com.try_get_property(instance, property_name)
             if has_collection and collection is not None:
                 try:
-                    snapshot = com.snapshot_collection(collection, property_name, self._options.max_collection_items)
+                    snapshot = com.snapshot_collection(collection, property_name, self._options.max_collection_items, offset)
                     updated_properties = dict(properties)
                     updated_properties[f"collection.{property_name}.count"] = str(snapshot.count)
-                    message = f"Result was truncated to {self._options.max_collection_items} items." if snapshot.is_truncated else None
-                    return DomainSummary(domain, True, snapshot.count, snapshot.items, updated_properties, message)
+                    message = f"More items available; request offset {snapshot.next_offset}." if snapshot.is_truncated else None
+                    return DomainSummary(domain, True, snapshot.count, snapshot.items, updated_properties, message, snapshot.next_offset)
                 except Exception as exception:  # noqa: BLE001 - records late-bound collection failures.
                     properties[f"collection.{property_name}.error"] = public_error_message(exception)
         display_name = com.read_display_name(instance, domain, 0)
         item = ItemSummary(0, display_name, com.get_string_property(instance, "TypeName"), com.get_string_property(instance, "Path"))
-        return DomainSummary(domain, True, 1, (item,), properties)
+        return DomainSummary(domain, True, 1, (item,) if offset == 0 else (), properties)
 
     def _create_failure(self, operation_name: str, exception: Exception) -> ToolResult:
         error_type = _classify_error(exception)
@@ -1777,7 +1842,7 @@ def _resolve_road(road_network: Any, selector: Selector) -> Any:
     return com.resolve_item(roads, selector)
 
 
-def _normalize_road_network_file_name(file_name: str, overwrite_existing: bool) -> str:
+def _normalize_road_network_file_name(file_name: str, overwrite_existing: bool, allow_existing: bool = False) -> str:
     if file_name.strip() == "":
         raise ValueError("Road network file name must not be empty.")
     full_path = Path(file_name).expanduser().resolve()
@@ -1787,9 +1852,35 @@ def _normalize_road_network_file_name(file_name: str, overwrite_existing: bool) 
         raise ValueError("Road network file name must end with .rd.")
     if not full_path.parent.exists():
         raise FileNotFoundError(f"Directory '{full_path.parent}' does not exist.")
-    if full_path.exists() and not overwrite_existing:
+    if full_path.exists() and not overwrite_existing and not allow_existing:
         raise FileExistsError(f"Road network file '{full_path}' already exists. Set overwriteExisting=true to replace it.")
     return str(full_path)
+
+
+def _project_pool_preview_target(
+    working_root: Path,
+    request: ProjectPoolFileCreationRequest,
+) -> tuple[str | None, bool | None, tuple[str, ...]]:
+    file_name = f"{request.name}{request.expected_extension()}"
+    environment_folders = {
+        ProjectPoolFileType.ROAD_NETWORK: "Road",
+        ProjectPoolFileType.TRAFFIC_SCENARIO: "Scenario",
+        ProjectPoolFileType.TRAFFIC_DRIVER: "Traffic Driver",
+    }
+    folder_name = environment_folders.get(request.file_type)
+    if folder_name is not None:
+        target = working_root / "Pool" / "Environment" / folder_name / file_name
+        return str(target), target.is_file(), (str(target),) if target.is_file() else ()
+
+    pool_root = working_root / "Pool"
+    if not pool_root.is_dir():
+        return None, None, ()
+    candidates = tuple(sorted(str(path) for path in pool_root.rglob(file_name) if path.is_file()))
+    if len(candidates) == 1:
+        return candidates[0], True, candidates
+    if candidates:
+        return None, True, candidates
+    return None, None, ()
 
 
 def _configure_road_lane_section(road: Any, lane_section_index: int, left_lane_count: int, right_lane_count: int, lane_width: float, lane_section_length: float) -> Any:
@@ -2530,3 +2621,22 @@ def _dry_run_preview(
     if download is not None:
         preview_details["wouldDownload"] = str(download).lower()
     return OperationInfo(operation_name, True, message, preview_details)
+<<<<<<< Updated upstream
+=======
+
+
+def _dry_run_preview(
+    operation_name: str,
+    details: dict[str, str | None],
+    save: bool | None = None,
+    download: bool | None = None,
+    message: str = "Dry-run preview; no changes were applied.",
+) -> OperationInfo:
+    preview_details = dict(details)
+    preview_details["dryRun"] = "true"
+    if save is not None:
+        preview_details["wouldSave"] = str(save).lower()
+    if download is not None:
+        preview_details["wouldDownload"] = str(download).lower()
+    return OperationInfo(operation_name, True, message, preview_details)
+>>>>>>> Stashed changes

@@ -71,20 +71,20 @@ class ModelDeskService:
 
         return self._gateway.open_project(project_file, initial_experiment, save_active)
 
-    def create_project_pool_file(self, file_type: str, name: str, overwrite_existing: bool) -> ToolResult:
+    def create_project_pool_file(self, file_type: str, name: str, overwrite_existing: bool, dry_run: bool = False) -> ToolResult:
         """Create a project-pool file."""
 
-        return self._gateway.create_project_pool_file(file_type, name, overwrite_existing)
+        return self._gateway.create_project_pool_file(file_type, name, overwrite_existing, dry_run)
 
-    def create_road_network(self, name: str, overwrite_existing: bool) -> ToolResult:
+    def create_road_network(self, name: str, overwrite_existing: bool, dry_run: bool = False) -> ToolResult:
         """Create a road network project-pool file."""
 
-        return self._gateway.create_road_network(name, overwrite_existing)
+        return self._gateway.create_road_network(name, overwrite_existing, dry_run)
 
-    def create_traffic_scenario(self, name: str, overwrite_existing: bool) -> ToolResult:
+    def create_traffic_scenario(self, name: str, overwrite_existing: bool, dry_run: bool = False) -> ToolResult:
         """Create a traffic-scenario project-pool file."""
 
-        return self._gateway.create_traffic_scenario(name, overwrite_existing)
+        return self._gateway.create_traffic_scenario(name, overwrite_existing, dry_run)
 
     def list_environment_pool_items(self, group: str, recursive: bool, offset: int = 0) -> ToolResult:
         """List Environment Pool items for a group."""
@@ -129,15 +129,15 @@ class ModelDeskService:
             return self._validation_failure("modeldesk_activate_parameter_set", public_error_message(exception))
         return self._gateway.activate_parameter_set(selector, save_active)
 
-    def get_parameterization_summary(self) -> ToolResult:
+    def get_parameterization_summary(self, offset: int = 0) -> ToolResult:
         """Get active parameterization summary."""
 
-        return self._gateway.get_domain_summary(ModelDeskDomain.PARAMETERIZATION, "modeldesk_get_parameterization_summary")
+        return self._gateway.get_domain_summary(ModelDeskDomain.PARAMETERIZATION, "modeldesk_get_parameterization_summary", offset)
 
-    def get_active_model_info(self) -> ToolResult:
+    def get_active_model_info(self, offset: int = 0) -> ToolResult:
         """Get active model information for the active experiment."""
 
-        return self._gateway.get_active_model_info()
+        return self._gateway.get_active_model_info(offset)
 
     def set_active_model(self, model_file_path: str, ml_working_directory: str | None, initialization_command: str | None, platform_name: str | None) -> ToolResult:
         """Set active model for the active experiment."""
@@ -159,10 +159,10 @@ class ModelDeskService:
 
         return self._gateway.set_parameter_value(parameter_path, value_kind, value_json)
 
-    def get_road_summary(self) -> ToolResult:
+    def get_road_summary(self, offset: int = 0) -> ToolResult:
         """Get active road summary."""
 
-        return self._gateway.get_domain_summary(ModelDeskDomain.ROADS, "modeldesk_get_road_summary")
+        return self._gateway.get_domain_summary(ModelDeskDomain.ROADS, "modeldesk_get_road_summary", offset)
 
     def activate_road(self, selector_kind: str, selector_value: str) -> ToolResult:
         """Activate a road."""
@@ -178,10 +178,10 @@ class ModelDeskService:
 
         return self._gateway.list_roads(offset)
 
-    def save_road_network_as(self, file_name: str, overwrite_existing: bool) -> ToolResult:
+    def save_road_network_as(self, file_name: str, overwrite_existing: bool, dry_run: bool = False) -> ToolResult:
         """Save active road network to file."""
 
-        return self._gateway.save_road_network_as(file_name, overwrite_existing)
+        return self._gateway.save_road_network_as(file_name, overwrite_existing, dry_run)
 
     def add_road(self, name: str | None, left_lane_count: int, right_lane_count: int, lane_width: float, save: bool, download: bool) -> ToolResult:
         """Add a road."""
@@ -284,10 +284,10 @@ class ModelDeskService:
 
         return self._gateway.create_basic_road(name, length, left_lane_count, right_lane_count, lane_width, traffic_objects_json, save, download)
 
-    def get_scenario_summary(self) -> ToolResult:
+    def get_scenario_summary(self, offset: int = 0) -> ToolResult:
         """Get scenario summary."""
 
-        return self._gateway.get_domain_summary(ModelDeskDomain.SCENARIOS, "modeldesk_get_scenario_summary")
+        return self._gateway.get_domain_summary(ModelDeskDomain.SCENARIOS, "modeldesk_get_scenario_summary", offset)
 
     def activate_scenario(self, scenario_name: str) -> ToolResult:
         """Activate a traffic scenario."""
@@ -331,50 +331,64 @@ class ModelDeskService:
             return fellow_selector
         return self._gateway.remove_scenario_fellow(fellow_selector, save, download, dry_run)
 
-    def add_scenario_maneuver(self, fellow_selector_kind: str, fellow_selector_value: str, properties_json: str | None, save: bool, download: bool) -> ToolResult:
+    def add_scenario_maneuver(self, fellow_selector_kind: str | None, fellow_selector_value: str | None, properties_json: str | None, save: bool, download: bool) -> ToolResult:
         """Add scenario maneuver."""
 
-        fellow_selector = self._create_selector("modeldesk_add_scenario_maneuver", fellow_selector_kind, fellow_selector_value)
+        fellow_selector = self._create_optional_selector("modeldesk_add_scenario_maneuver", fellow_selector_kind, fellow_selector_value)
         if isinstance(fellow_selector, ToolResult):
             return fellow_selector
+        if fellow_selector is None:
+            fellow_selector = Selector.active()
         return self._gateway.add_scenario_maneuver(fellow_selector, properties_json, save, download)
 
-    def update_scenario_maneuver(self, fellow_selector_kind: str, fellow_selector_value: str, maneuver_selector_kind: str, maneuver_selector_value: str, properties_json: str | None, save: bool, download: bool) -> ToolResult:
+    def update_scenario_maneuver(self, fellow_selector_kind: str | None, fellow_selector_value: str | None, maneuver_selector_kind: str, maneuver_selector_value: str, properties_json: str | None, save: bool, download: bool) -> ToolResult:
         """Update scenario maneuver."""
 
-        fellow_selector = self._create_selector("modeldesk_update_scenario_maneuver", fellow_selector_kind, fellow_selector_value)
+        fellow_selector = self._create_optional_selector("modeldesk_update_scenario_maneuver", fellow_selector_kind, fellow_selector_value)
         if isinstance(fellow_selector, ToolResult):
             return fellow_selector
+        if fellow_selector is None:
+            fellow_selector = Selector.active()
         maneuver_selector = self._create_selector("modeldesk_update_scenario_maneuver", maneuver_selector_kind, maneuver_selector_value)
         if isinstance(maneuver_selector, ToolResult):
             return maneuver_selector
         return self._gateway.update_scenario_maneuver(fellow_selector, maneuver_selector, properties_json, save, download)
 
+<<<<<<< Updated upstream
     def remove_scenario_maneuver(self, fellow_selector_kind: str, fellow_selector_value: str, maneuver_selector_kind: str, maneuver_selector_value: str, save: bool, download: bool, dry_run: bool = False) -> ToolResult:
+=======
+    def remove_scenario_maneuver(self, fellow_selector_kind: str | None, fellow_selector_value: str | None, maneuver_selector_kind: str, maneuver_selector_value: str, save: bool, download: bool, dry_run: bool = False) -> ToolResult:
+>>>>>>> Stashed changes
         """Remove scenario maneuver."""
 
-        fellow_selector = self._create_selector("modeldesk_remove_scenario_maneuver", fellow_selector_kind, fellow_selector_value)
+        fellow_selector = self._create_optional_selector("modeldesk_remove_scenario_maneuver", fellow_selector_kind, fellow_selector_value)
         if isinstance(fellow_selector, ToolResult):
             return fellow_selector
+        if fellow_selector is None:
+            fellow_selector = Selector.active()
         maneuver_selector = self._create_selector("modeldesk_remove_scenario_maneuver", maneuver_selector_kind, maneuver_selector_value)
         if isinstance(maneuver_selector, ToolResult):
             return maneuver_selector
         return self._gateway.remove_scenario_maneuver(fellow_selector, maneuver_selector, save, download, dry_run)
 
-    def set_scenario_maneuver_sequence(self, fellow_selector_kind: str, fellow_selector_value: str, maneuver_selectors_json: str, save: bool, download: bool) -> ToolResult:
-        """Set scenario maneuver sequence."""
+    def verify_scenario_maneuver_sequence(self, fellow_selector_kind: str | None, fellow_selector_value: str | None, maneuver_selectors_json: str) -> ToolResult:
+        """Compare the requested order with the current immutable maneuver order."""
 
-        fellow_selector = self._create_selector("modeldesk_set_scenario_maneuver_sequence", fellow_selector_kind, fellow_selector_value)
+        fellow_selector = self._create_optional_selector("modeldesk_verify_scenario_maneuver_sequence", fellow_selector_kind, fellow_selector_value)
         if isinstance(fellow_selector, ToolResult):
             return fellow_selector
-        return self._gateway.set_scenario_maneuver_sequence(fellow_selector, maneuver_selectors_json, save, download)
+        if fellow_selector is None:
+            fellow_selector = Selector.active()
+        return self._gateway.verify_scenario_maneuver_sequence(fellow_selector, maneuver_selectors_json)
 
-    def set_maneuver_behavior_profiles(self, fellow_selector_kind: str, fellow_selector_value: str, maneuver_selector_kind: str, maneuver_selector_value: str, longitudinal_profile_json: str | None, lateral_profile_json: str | None, save: bool, download: bool) -> ToolResult:
+    def set_maneuver_behavior_profiles(self, fellow_selector_kind: str | None, fellow_selector_value: str | None, maneuver_selector_kind: str, maneuver_selector_value: str, longitudinal_profile_json: str | None, lateral_profile_json: str | None, save: bool, download: bool) -> ToolResult:
         """Set maneuver behavior profiles."""
 
-        fellow_selector = self._create_selector("modeldesk_set_maneuver_behavior_profiles", fellow_selector_kind, fellow_selector_value)
+        fellow_selector = self._create_optional_selector("modeldesk_set_maneuver_behavior_profiles", fellow_selector_kind, fellow_selector_value)
         if isinstance(fellow_selector, ToolResult):
             return fellow_selector
+        if fellow_selector is None:
+            fellow_selector = Selector.active()
         maneuver_selector = self._create_selector("modeldesk_set_maneuver_behavior_profiles", maneuver_selector_kind, maneuver_selector_value)
         if isinstance(maneuver_selector, ToolResult):
             return maneuver_selector
@@ -393,7 +407,7 @@ class ModelDeskService:
     def list_fellow_activities(self, fellow_selector_kind: str, fellow_selector_value: str, offset: int = 0) -> ToolResult:
         """List maneuvers/activities for a fellow or the ego vehicle."""
 
-        fellow_selector = self._create_selector("modeldesk_list_fellow_activities", fellow_selector_kind, fellow_selector_value)
+        fellow_selector = self._create_selector("modeldesk_list_fellow_activities", fellow_selector_kind, fellow_selector_value, allow_active=True)
         if isinstance(fellow_selector, ToolResult):
             return fellow_selector
         return self._gateway.list_fellow_activities(fellow_selector, offset)
@@ -401,7 +415,7 @@ class ModelDeskService:
     def get_vehicle_object_type(self, fellow_selector_kind: str, fellow_selector_value: str, maneuver_index: int) -> ToolResult:
         """Return the active 3D object type for a fellow or ego maneuver."""
 
-        fellow_selector = self._create_selector("modeldesk_get_vehicle_object_type", fellow_selector_kind, fellow_selector_value)
+        fellow_selector = self._create_selector("modeldesk_get_vehicle_object_type", fellow_selector_kind, fellow_selector_value, allow_active=True)
         if isinstance(fellow_selector, ToolResult):
             return fellow_selector
         return self._gateway.get_vehicle_object_type(fellow_selector, maneuver_index)
@@ -409,7 +423,7 @@ class ModelDeskService:
     def list_vehicle_object_types(self, fellow_selector_kind: str, fellow_selector_value: str, maneuver_index: int, offset: int = 0) -> ToolResult:
         """List all available 3D object types for a fellow or ego maneuver."""
 
-        fellow_selector = self._create_selector("modeldesk_list_vehicle_object_types", fellow_selector_kind, fellow_selector_value)
+        fellow_selector = self._create_selector("modeldesk_list_vehicle_object_types", fellow_selector_kind, fellow_selector_value, allow_active=True)
         if isinstance(fellow_selector, ToolResult):
             return fellow_selector
         return self._gateway.list_vehicle_object_types(fellow_selector, maneuver_index, offset)
@@ -417,15 +431,15 @@ class ModelDeskService:
     def set_vehicle_object_type(self, fellow_selector_kind: str, fellow_selector_value: str, maneuver_index: int, element_index: int, save: bool, download: bool) -> ToolResult:
         """Activate a 3D object type by index for a fellow or ego maneuver."""
 
-        fellow_selector = self._create_selector("modeldesk_set_vehicle_object_type", fellow_selector_kind, fellow_selector_value)
+        fellow_selector = self._create_selector("modeldesk_set_vehicle_object_type", fellow_selector_kind, fellow_selector_value, allow_active=True)
         if isinstance(fellow_selector, ToolResult):
             return fellow_selector
         return self._gateway.set_vehicle_object_type(fellow_selector, maneuver_index, element_index, save, download)
 
-    def get_traffic_objects_summary(self) -> ToolResult:
+    def get_traffic_objects_summary(self, offset: int = 0) -> ToolResult:
         """Get traffic-object summary."""
 
-        return self._gateway.get_domain_summary(ModelDeskDomain.TRAFFIC_OBJECTS, "modeldesk_get_traffic_objects_summary")
+        return self._gateway.get_domain_summary(ModelDeskDomain.TRAFFIC_OBJECTS, "modeldesk_get_traffic_objects_summary", offset)
 
     def list_traffic_objects(self, offset: int = 0) -> ToolResult:
         """List traffic objects."""
@@ -445,25 +459,25 @@ class ModelDeskService:
             return selector
         return self._gateway.validate_traffic_object_reference(selector)
 
-    def get_processing_summary(self) -> ToolResult:
+    def get_processing_summary(self, offset: int = 0) -> ToolResult:
         """Get processing summary."""
 
-        return self._gateway.get_domain_summary(ModelDeskDomain.PROCESSING, "modeldesk_get_processing_summary")
+        return self._gateway.get_domain_summary(ModelDeskDomain.PROCESSING, "modeldesk_get_processing_summary", offset)
 
-    def get_processing_configuration(self) -> ToolResult:
+    def get_processing_configuration(self, offset: int = 0) -> ToolResult:
         """Get processing configuration."""
 
-        return self._gateway.get_processing_configuration()
+        return self._gateway.get_processing_configuration(offset)
 
     def run_processing(self) -> ToolResult:
         """Run processing."""
 
         return self._gateway.run_processing()
 
-    def get_test_summary(self) -> ToolResult:
+    def get_test_summary(self, offset: int = 0) -> ToolResult:
         """Get testing summary."""
 
-        return self._gateway.get_domain_summary(ModelDeskDomain.TESTING, "modeldesk_get_test_summary")
+        return self._gateway.get_domain_summary(ModelDeskDomain.TESTING, "modeldesk_get_test_summary", offset)
 
     def activate_test(self, test_name: str) -> ToolResult:
         """Activate a test."""
@@ -488,10 +502,10 @@ class ModelDeskService:
 
         return self._gateway.execute_test(scope, selector_kind, selector_value)
 
-    def get_plotting_summary(self) -> ToolResult:
+    def get_plotting_summary(self, offset: int = 0) -> ToolResult:
         """Get plotting summary."""
 
-        return self._gateway.get_domain_summary(ModelDeskDomain.PLOTTING, "modeldesk_get_plotting_summary")
+        return self._gateway.get_domain_summary(ModelDeskDomain.PLOTTING, "modeldesk_get_plotting_summary", offset)
 
     def activate_plotting(self, selector_kind: str, selector_value: str) -> ToolResult:
         """Activate plotting."""
@@ -517,6 +531,8 @@ class ModelDeskService:
         candidate_capture: str,
         signal_specs_json: str,
         tolerances_json: str,
+        offset: int = 0,
+        limit: int = 100,
     ) -> ToolResult:
         """Compare two MATLAB captures from the active project's measurement pool."""
 
@@ -525,6 +541,8 @@ class ModelDeskService:
             candidate_capture,
             signal_specs_json,
             tolerances_json,
+            offset,
+            limit,
         )
 
     def save_active_experiment(self) -> ToolResult:
@@ -587,11 +605,22 @@ class ModelDeskService:
         }
         return ToolResult.success("modeldesk_list_tools_by_use_case", self._gateway.session_id, data)
 
-    def _create_selector(self, operation_name: str, selector_kind: str | None, selector_value: str | None) -> Selector | ToolResult:
+    def _create_selector(
+        self,
+        operation_name: str,
+        selector_kind: str | None,
+        selector_value: str | None,
+        allow_active: bool = False,
+    ) -> Selector | ToolResult:
+        if selector_kind is None or selector_kind.strip() == "":
+            return self._validation_failure(operation_name, "An explicit target selector is required.")
         try:
-            return Selector.create(selector_kind, selector_value)
+            selector = Selector.create(selector_kind, selector_value)
         except ValueError as exception:
             return self._validation_failure(operation_name, public_error_message(exception))
+        if selector.by.value == "Active" and not allow_active:
+            return self._validation_failure(operation_name, "An explicit target selector is required; active is not valid for this operation.")
+        return selector
 
     def _create_optional_selector(self, operation_name: str, selector_kind: str | None, selector_value: str | None) -> Selector | None | ToolResult:
         if selector_kind is None or selector_kind.strip() == "":

@@ -32,11 +32,15 @@ Effects describe the principal operation, not a guarantee of availability or ato
 
 Keep `save=false` and `download=false` on editing tools until persistence and runtime synchronization are intended. This still allows in-memory changes. `saveActive` and project-close `save` default to true; maneuver startup also defaults to downloading if runtime is not running. Execute dependent calls sequentially and inspect state again after an error.
 
+<<<<<<< Updated upstream
 ## Pagination and Dry-Run
 
 The collection tools `modeldesk_list_environment_pool_items`, `modeldesk_list_experiments`, `modeldesk_list_parameter_sets`, `modeldesk_list_roads`, `modeldesk_list_scenario_fellows`, `modeldesk_list_scenario_maneuvers`, `modeldesk_list_fellow_activities`, `modeldesk_list_vehicle_object_types`, `modeldesk_list_traffic_objects`, `modeldesk_list_traffic_object_folders`, `modeldesk_list_logical_test_cases`, `modeldesk_list_concrete_test_cases`, `modeldesk_list_plot_captures`, and `modeldesk_list_plot_layouts` accept a zero-based `offset` (default `0`). Page size is bounded by `MODELDESK_MCP_MAX_COLLECTION_ITEMS` (default `500`). Continue with `data.nextOffset` until it is `null`; `data.count` reports the total collection size.
 
 `dryRun=true` previews the target without applying the operation on `modeldesk_close_project`, `modeldesk_remove_road`, `modeldesk_remove_road_segment`, `modeldesk_remove_road_object`, `modeldesk_disconnect_road`, `modeldesk_remove_scenario_fellow`, `modeldesk_remove_scenario_maneuver`, `modeldesk_remove_traffic_object`, and `modeldesk_remove_traffic_object_folder`. It defaults to `false`. A preview returns `data.details.dryRun=true` and does not save or download. For project close, the preview cannot inspect whether unsaved changes exist and returns `unsavedChanges="unknown"`.
+=======
+The static MCP resource `modeldesk://workflow-catalog` lists all workflow names, ordered steps, required tools, and supported use-case identifiers. Read it before calling `modeldesk_get_workflow_plan` or `modeldesk_list_tools_by_use_case` when the exact name or identifier is unknown.
+>>>>>>> Stashed changes
 
 ## Shared Infrastructure
 
@@ -125,7 +129,7 @@ Segment inputs use zero-based collection indices even when a returned COM `Index
 | `modeldesk_add_scenario_maneuver` | Add an ego maneuver or a sequence in the selected Fellow scope. | Edit |
 | `modeldesk_update_scenario_maneuver` | Patch the selected ego maneuver or Fellow sequence. | Edit |
 | `modeldesk_remove_scenario_maneuver` | Remove a selected maneuver/sequence; use a freshly listed index for Fellow sequences. | Edit |
-| `modeldesk_set_scenario_maneuver_sequence` | Confirm an already-matching order; reject changed order because reordering is unsupported. | Context |
+| `modeldesk_verify_scenario_maneuver_sequence` | Compare a requested order with the immutable current sequence; no changes are applied. | Inspect |
 | `modeldesk_set_maneuver_behavior_profiles` | Set and read back ego initial values or one explicit Fellow behavior profile. | Edit |
 | `modeldesk_get_scenario_road` | Inspect the active scenario's referenced road, subject to available identity fields. | Inspect |
 | `modeldesk_set_scenario_road` | Assign a listed road by name to the active scenario. | Edit |
@@ -173,9 +177,9 @@ Inspect capability flags before catalog mutations. An empty catalog or disabled 
 | `modeldesk_activate_plotting` | Activate a plotting configuration by selector. | Context |
 | `modeldesk_list_plot_captures` | List captures in the active plotting configuration. | Inspect |
 | `modeldesk_list_plot_layouts` | List plot layouts in the active plotting configuration. | Inspect |
-| `modeldesk_compare_captures` | Compare two project Measurements MAT files using selected signals and numeric tolerances. | Analyze |
+| `modeldesk_compare_captures` | Compare two project Measurements MAT files using selected signals and numeric tolerances; comparison rows are paginated. | Analyze |
 
-Test activation and execution need installed test content and any required runtime setup. Plot capture listing and capture comparison are separate operations: comparison uses capture filenames in the active project's Measurements folder, not arbitrary external paths. Signal specs and tolerances are JSON-encoded arguments.
+Test activation and execution need installed test content and any required runtime setup. Plot capture listing and capture comparison are separate operations: comparison uses capture filenames in the active project's Measurements folder, not arbitrary external paths. Signal specs and tolerances are JSON-encoded arguments. The comparison `signalSet` returns counts only (`commonCount`, `onlyReferenceCount`, and `onlyCandidateCount`); `comparisons` is paginated by `offset` and `limit`.
 
 ## Inputs and Results
 

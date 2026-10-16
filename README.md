@@ -85,7 +85,7 @@ Every tool returns the same seven top-level fields: `ok`, `operation`, `sessionI
 - Catalog editing, processing, testing, and visualization depend on the active installation and project context.
 - Tool availability and deterministic tests do not establish that every operation works in every live ModelDesk environment.
 
-The server registers tools only: no MCP resources or prompts are registered.
+The server registers 83 MCP tools and one static resource, `modeldesk://workflow-catalog`, which lists workflow recipes and use-case identifiers. No MCP prompts are registered.
 
 ## Verification and development
 
