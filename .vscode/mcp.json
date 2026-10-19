@@ -5,6 +5,6 @@
       "command": "${workspaceFolder}\\ModelDeskMCP.cmd",
       "args": [],
       "cwd": "${workspaceFolder}"
-      }
     }
+  }
 }
