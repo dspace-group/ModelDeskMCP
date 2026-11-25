@@ -631,8 +631,9 @@ class ModelDeskAutomationGateway:
 
         def operation(application: Any) -> OperationInfo:
             maneuvers = _get_scenario_maneuvers_collection(application, fellow_selector)
+            resolved_selector = _maneuver_selector_to_collection_selector(maneuvers, fellow_selector, maneuver_selector)
             if dry_run:
-                maneuver = com.resolve_item(maneuvers, maneuver_selector)
+                maneuver = com.resolve_item(maneuvers, resolved_selector)
                 details = {
                     "fellowSelectorKind": fellow_selector.by.value,
                     "fellowSelectorValue": fellow_selector.value,
@@ -641,7 +642,7 @@ class ModelDeskAutomationGateway:
                     "maneuverName": com.get_first_string_property(maneuver, "Name", "CompleteName"),
                 }
                 return _dry_run_preview("modeldesk_remove_scenario_maneuver", details, save, download)
-            _remove_collection_item(maneuvers, maneuver_selector, "maneuver")
+            _remove_collection_item(maneuvers, resolved_selector, "maneuver")
             details = {
                 "fellowSelectorKind": fellow_selector.by.value,
                 "fellowSelectorValue": fellow_selector.value,
@@ -654,21 +655,42 @@ class ModelDeskAutomationGateway:
         return self._execute_com("modeldesk_remove_scenario_maneuver", operation)
 
     def verify_scenario_maneuver_sequence(self, fellow_selector: Selector, maneuver_selectors_json: str) -> ToolResult:
-        """Compare the requested maneuver order with the current immutable order."""
+        """Compare the full order without changes, saving, or downloading.
+
+        Ego identity uses its COM Index; Fellow identity uses collection position.
+        Unresolvable or ambiguous selectors return a structured failure.
+        """
 
         def operation(application: Any) -> OperationInfo:
             maneuver_selectors = parse_selector_array_json(maneuver_selectors_json, "maneuverSelectorsJson")
             if len(maneuver_selectors) == 0:
                 raise ValueError("At least one maneuver selector is required.")
             maneuvers = _get_scenario_maneuvers_collection(application, fellow_selector)
-            current_indices = [
-                _read_int_property(_invoke_required_item(maneuvers, index, "maneuver"), "Index")
-                for index in range(com.get_count(maneuvers))
-            ]
+            count = com.get_count(maneuvers)
+            is_ego = fellow_selector.by == SelectorKind.ACTIVE
+            current_indices = (
+                [_read_int_property(_invoke_required_item(maneuvers, index, "maneuver"), "Index") for index in range(count)]
+                if is_ego else list(range(count))
+            )
             requested_indices: list[int] = []
             for selector in maneuver_selectors:
-                requested_maneuver = com.resolve_item(maneuvers, selector)
-                requested_indices.append(_read_int_property(requested_maneuver, "Index"))
+                if not is_ego and selector.by == SelectorKind.INDEX and int(selector.to_com_value()) >= count:
+                    raise RuntimeError(f"No maneuver found for selector '{selector.by.value}:{selector.value}'.")
+                if is_ego:
+                    requested_maneuver = com.resolve_item(maneuvers, selector)
+                    requested_indices.append(_read_int_property(requested_maneuver, "Index"))
+                elif selector.by == SelectorKind.INDEX:
+                    com.resolve_item(maneuvers, selector)
+                    requested_indices.append(int(selector.to_com_value()))
+                else:
+                    name = selector.value if selector.by == SelectorKind.NAME else com.get_string_property(com.resolve_item(maneuvers, selector), "Name")
+                    positions = [
+                        index for index in range(count)
+                        if name is not None and com.get_string_property(_invoke_required_item(maneuvers, index, "maneuver"), "Name") == name
+                    ]
+                    if len(positions) != 1:
+                        raise RuntimeError(f"Cannot uniquely resolve maneuver selector '{selector.by.value}:{selector.value}'.")
+                    requested_indices.append(positions[0])
             matches_current_order = requested_indices == current_indices
             details = {
                 "fellowSelectorKind": fellow_selector.by.value,
@@ -686,14 +708,15 @@ class ModelDeskAutomationGateway:
 
         return self._execute_com("modeldesk_verify_scenario_maneuver_sequence", operation)
 
-    def set_maneuver_behavior_profiles(self, fellow_selector: Selector, maneuver_selector: Selector, longitudinal_profile_json: str | None, lateral_profile_json: str | None, save: bool, download: bool) -> ToolResult:
+    def set_maneuver_behavior_profiles(self, fellow_selector: Selector, maneuver_selector: Selector, longitudinal_profile_json: str | None, lateral_profile_json: str | None, save: bool, download: bool, segment_index: int = 0) -> ToolResult:
         """Apply and verify ego sequence or fellow profile values before persistence.
 
         The active fellow selector targets the ego sequence's direct StartPosition and
         InitialLongitudinalVelocity members; values are passed through unchanged (meters
-        along the route and km/h). A fellow selector targets only Segments.Item(0).Activity
-        and selects either Position -> YawAngleConstant or Velocity -> Constant; a segment
-        has only one active longitudinal profile. Both JSON sides are
+        along the route and km/h). A fellow selector targets the selected segment's Activity
+        and selects either Position -> YawAngleConstant or Velocity -> Constant, and the
+        optional lateral LaneSelection -> Constant. The lateral scalar has no known unit.
+        Both JSON sides are
         validated before COM traversal; failures after profile activation or assignment may
         leave partial in-memory changes, which this operation does not roll back. Save and
         Download run only after every requested value has been read back successfully.
@@ -704,6 +727,10 @@ class ModelDeskAutomationGateway:
             maneuver_selector.validate()
             if maneuver_selector.by == SelectorKind.ACTIVE:
                 raise ValueError("Maneuver selector must not use active.")
+            if type(segment_index) is not int or not 0 <= segment_index <= 2147483647:
+                raise ValueError("segmentIndex must be an integer from 0 to 2147483647.")
+            if fellow_selector.by == SelectorKind.ACTIVE and segment_index != 0:
+                raise ValueError("The ego requires segmentIndex 0.")
             request = ManeuverBehaviorProfileRequest.create(
                 fellow_selector,
                 longitudinal_profile_json,
@@ -726,7 +753,8 @@ class ModelDeskAutomationGateway:
 
             try:
                 maneuvers = _get_scenario_maneuvers_collection(application, fellow_selector)
-                sequence = com.resolve_item(maneuvers, maneuver_selector)
+                resolved_selector = _maneuver_selector_to_collection_selector(maneuvers, fellow_selector, maneuver_selector)
+                sequence = com.resolve_item(maneuvers, resolved_selector)
                 updated_count = 0
                 details: dict[str, str | None] = {
                     "fellowSelectorKind": fellow_selector.by.value,
@@ -734,6 +762,30 @@ class ModelDeskAutomationGateway:
                     "maneuverSelectorKind": maneuver_selector.by.value,
                     "maneuverSelectorValue": maneuver_selector.value,
                 }
+
+                longitudinal_type = None
+                lateral_type = None
+                if fellow_selector.by != SelectorKind.ACTIVE:
+                    phase = "reading the selected fellow sequence segments"
+                    segments = _get_required_property(sequence, "Segments")
+                    segment_count = com.get_count(segments)
+                    if segment_count <= 0:
+                        raise RuntimeError("The selected fellow sequence has no segments; no segment was created.")
+                    if segment_index >= segment_count:
+                        raise RuntimeError("The selected fellow segment index is out of range; no segment was created.")
+                    segment = com.invoke_item(segments, segment_index)
+                    if segment is None:
+                        raise RuntimeError("The selected fellow segment could not be read.")
+                    activity = _get_required_property(segment, "Activity")
+                    details["segmentIndex"] = str(segment_index)
+                    if request.longitudinal_properties:
+                        longitudinal_type = _get_required_property(activity, "LongitudinalType")
+                    if request.lateral_properties:
+                        lateral_type = _get_required_property(activity, "LateralType")
+                    if longitudinal_type is not None:
+                        _require_available_profile_element(longitudinal_type, next(iter(request.longitudinal_properties)), "longitudinal profile")
+                    if lateral_type is not None:
+                        _require_available_profile_element(lateral_type, "LaneSelection", "lateral profile")
 
                 if request.longitudinal_properties:
                     if fellow_selector.by == SelectorKind.ACTIVE:
@@ -754,15 +806,6 @@ class ModelDeskAutomationGateway:
                             details[detail_names[property_name]] = str(actual_value)
                             updated_count += 1
                     else:
-                        phase = "reading the selected fellow sequence segments"
-                        segments = _get_required_property(sequence, "Segments")
-                        if com.get_count(segments) <= 0:
-                            raise RuntimeError("The selected fellow sequence has no segments; no segment was created.")
-                        segment = com.invoke_item(segments, 0)
-                        if segment is None:
-                            raise RuntimeError("The selected fellow sequence's first segment could not be read.")
-                        activity = _get_required_property(segment, "Activity")
-                        longitudinal_type = _get_required_property(activity, "LongitudinalType")
                         profile_name, source_properties = next(iter(request.longitudinal_properties.items()))
                         source_name, constant_properties = next(iter(source_properties.items()))
 
@@ -794,20 +837,22 @@ class ModelDeskAutomationGateway:
                         updated_count += 1
 
                 if request.lateral_properties:
-                    phase = "resolving the existing lateral profile target"
-                    lateral_target = _get_first_available_property(
-                        sequence,
-                        "LateralBehavior",
-                        "LateralProfile",
-                        "Lateral",
-                    )
-                    phase = "applying and reading back lateral profile properties"
-                    updated_count += _apply_verified_scalar_properties(
-                        lateral_target,
-                        request.lateral_properties,
-                        "lateralProfileJson",
-                        mark_mutation,
-                    )
+                    if fellow_selector.by == SelectorKind.ACTIVE:
+                        phase = "resolving the existing lateral profile target"
+                        lateral_target = _get_first_available_property(sequence, "LateralBehavior", "LateralProfile", "Lateral")
+                        phase = "applying and reading back lateral profile properties"
+                        updated_count += _apply_verified_scalar_properties(lateral_target, request.lateral_properties, "lateralProfileJson", mark_mutation)
+                    else:
+                        phase = "activating the fellow LaneSelection profile"
+                        lateral_profile = _activate_available_profile_element(lateral_type, "LaneSelection", "lateral profile", mark_mutation)
+                        source_type = _get_required_property(lateral_profile, "SourceType")
+                        phase = "activating the fellow Constant lateral source"
+                        lateral_source = _activate_available_profile_element(source_type, "Constant", "LaneSelection source", mark_mutation)
+                        phase = "setting and reading back fellow LaneSelection.Constant"
+                        requested_value = request.lateral_properties["LaneSelection"]["Constant"]["Constant"]
+                        actual_value = _set_and_verify_profile_property(lateral_source, "Constant", requested_value, "fellow LaneSelection.Constant")
+                        details["lateralLaneSelection"] = str(actual_value)
+                        updated_count += 1
 
                 details["updatedPropertyCount"] = str(updated_count)
                 active_experiment = None
@@ -846,7 +891,12 @@ class ModelDeskAutomationGateway:
             has_road, road = com.try_get_property(scenario, "Road")
             if not has_road or road is None:
                 return OperationInfo("modeldesk_get_scenario_road", True, "Traffic scenario has no road reference.", {})
-            details = com.read_properties(road, "Name", "Path", "FileName", "CompleteName")
+            if isinstance(road, str):
+                if road.strip() == "":
+                    return OperationInfo("modeldesk_get_scenario_road", True, "Traffic scenario has no road reference.", {})
+                details = {"Name": road, "Path": None, "FileName": None, "CompleteName": None}
+            else:
+                details = com.read_properties(road, "Name", "Path", "FileName", "CompleteName")
             return OperationInfo("modeldesk_get_scenario_road", True, "Traffic scenario road reference read.", details)
 
         return self._execute_com("modeldesk_get_scenario_road", operation)
@@ -1167,7 +1217,7 @@ class ModelDeskAutomationGateway:
             "scenarioAuthoringMutation": _can_resolve_domain(application, ModelDeskDomain.SCENARIOS),
             "trafficObjects": _can_resolve_domain(application, ModelDeskDomain.TRAFFIC_OBJECTS),
             "trafficObjectInspection": _can_resolve_domain(application, ModelDeskDomain.TRAFFIC_OBJECTS),
-            "trafficObjectCatalogMutation": False,
+            "trafficObjectCatalogMutation": _can_mutate_traffic_object_catalog(application),
             "processing": _can_resolve_domain(application, ModelDeskDomain.PROCESSING),
             "processingConfiguration": _can_resolve_domain(application, ModelDeskDomain.PROCESSING),
             # Testing flags describe API support, so never resolve the lazy ActiveExperiment.Test getter here.
@@ -1179,10 +1229,9 @@ class ModelDeskAutomationGateway:
             "automationJobs": False,
             "workflow": True,
         }
-        disabled = (
-            "Traffic object catalog mutation (AddTrafficObject, RemoveTrafficObject, AddFolder, RemoveFolder) is COM-capable but not yet exposed as MCP tools.",
-            "Persistent automation jobs are disabled until the job registry is implemented.",
-        )
+        disabled = (() if domains["trafficObjectCatalogMutation"] else (
+            "Traffic object catalog mutation requires an accessible manager with AddTrafficObject, RemoveTrafficObject, AddFolder, and RemoveFolder methods.",
+        )) + ("Persistent automation jobs are disabled until the job registry is implemented.",)
         python_version = f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
         return CapabilityReport(__version__, None, platform.platform(), sys.platform.startswith("win"), self._options.prog_id, True, domains, disabled, python_version)
 
@@ -1592,7 +1641,9 @@ class ModelDeskAutomationGateway:
 
     def _add_or_update_scenario_maneuver_core(self, application: Any, fellow_selector: Selector, maneuver_selector: Selector, properties_json: str | None, save: bool, download: bool, operation_name: str, add_mode: bool) -> OperationInfo:
         maneuvers = _get_scenario_maneuvers_collection(application, fellow_selector)
-        maneuver = _invoke_required_method(maneuvers, "Add") if add_mode else com.resolve_item(maneuvers, maneuver_selector)
+        maneuver = _invoke_required_method(maneuvers, "Add") if add_mode else com.resolve_item(
+            maneuvers, _maneuver_selector_to_collection_selector(maneuvers, fellow_selector, maneuver_selector)
+        )
         updated_count = _apply_scalar_properties_from_json(maneuver, properties_json, "propertiesJson")
         details = com.read_properties(maneuver, "Name", "TypeName", "Path", "ObjectID")
         details["fellowSelectorKind"] = fellow_selector.by.value
@@ -1779,6 +1830,18 @@ def _get_active_parameter_set_processing(application: Any) -> Any:
 
 def _get_traffic_object_manager(application: Any) -> Any:
     return _get_required_property(_get_active_project(application), "TrafficObjectManager")
+
+
+def _can_mutate_traffic_object_catalog(application: Any) -> bool:
+    """Check native CRUD availability without invoking catalog mutators."""
+    try:
+        manager = _get_traffic_object_manager(application)
+        return all(
+            callable(com.try_get_property(manager, method_name)[1])
+            for method_name in ("AddTrafficObject", "RemoveTrafficObject", "AddFolder", "RemoveFolder")
+        )
+    except Exception:
+        return False
 
 
 def _get_active_test(application: Any) -> Any:
@@ -2080,6 +2143,21 @@ def _get_scenario_maneuvers_collection(application: Any, fellow_selector: Select
     return _get_first_available_property(fellow, "Sequences")
 
 
+def _maneuver_selector_to_collection_selector(maneuvers: Any, fellow_selector: Selector, maneuver_selector: Selector) -> Selector:
+    """Resolve a unique Fellow sequence name by position without changing ego selectors."""
+
+    maneuver_selector.validate()
+    if fellow_selector.by == SelectorKind.ACTIVE or maneuver_selector.by != SelectorKind.NAME:
+        return maneuver_selector
+    positions = [
+        index for index in range(com.get_count(maneuvers))
+        if com.get_string_property(_invoke_required_item(maneuvers, index, "maneuver"), "Name") == maneuver_selector.value
+    ]
+    if len(positions) != 1:
+        raise RuntimeError(f"Cannot uniquely resolve maneuver selector '{maneuver_selector.by.value}:{maneuver_selector.value}'.")
+    return Selector(SelectorKind.INDEX, str(positions[0]))
+
+
 def _resolve_ego_maneuver_sequence(maneuver: Any) -> Any:
     """Resolve the only unambiguous sequence beneath a selected ego maneuver.
 
@@ -2151,9 +2229,12 @@ def _summarize_type_elements(
     bounded = elements[offset:end_offset]
     items: list[ItemSummary] = []
     for index, element in enumerate(bounded, start=offset):
-        name = com.read_display_name(element, item_kind, index) if element is not None else f"{item_kind} {index}"
-        path = com.get_first_string_property(element, "Path", "CompleteName", "FileName") if element is not None else None
-        kind = com.get_first_string_property(element, "TypeName", "Kind", "ObjectType") if element is not None else None
+        if isinstance(element, str):
+            name, path, kind = element, None, item_kind
+        else:
+            name = com.read_display_name(element, item_kind, index) if element is not None else f"{item_kind} {index}"
+            path = com.get_first_string_property(element, "Path", "CompleteName", "FileName") if element is not None else None
+            kind = com.get_first_string_property(element, "TypeName", "Kind", "ObjectType") if element is not None else None
         items.append(ItemSummary(index, name, kind, path))
     next_offset = end_offset if end_offset < len(elements) else None
     message = f"More items available; request offset {next_offset}." if next_offset is not None else None
@@ -2215,6 +2296,31 @@ def _activate_available_profile_element(
     selection_label: str,
     mark_mutation: Callable[[], None],
 ) -> Any:
+    _require_available_profile_element(selection_manager, element_name, selection_label)
+    mark_mutation()
+    activation = com.invoke_method(selection_manager, "Activate", element_name)
+    if activation is False:
+        raise RuntimeError(f"Activation of {selection_label} '{element_name}' returned false.")
+    active_element = _get_required_property(selection_manager, "ActiveElement")
+    expected_interfaces = {
+        ("longitudinal profile", "Position"): "IMAPosition",
+        ("longitudinal profile", "Velocity"): "IMAFellowVelocity",
+        ("lateral profile", "LaneSelection"): "IMALaneSelection",
+        ("Position source", "YawAngleConstant"): "IMAYawAngleConstant",
+        ("Velocity source", "Constant"): "IMAConstant",
+        ("LaneSelection source", "Constant"): "IMAConstant",
+    }
+    expected_interface = expected_interfaces.get((selection_label, element_name))
+    try:
+        active_interface = active_element._oleobj_.GetTypeInfo().GetDocumentation(-1)[0]
+    except Exception as exception:
+        raise RuntimeError(f"Could not verify active {selection_label} '{element_name}' identity.") from exception
+    if expected_interface is None or active_interface != expected_interface:
+        raise RuntimeError(f"Active {selection_label} '{element_name}' identity did not match.")
+    return active_element
+
+
+def _require_available_profile_element(selection_manager: Any, element_name: str, selection_label: str) -> None:
     available_elements = com.get_property(selection_manager, "AvailableElements")
     if isinstance(available_elements, str):
         normalized_available_elements = (available_elements,)
@@ -2225,9 +2331,6 @@ def _activate_available_profile_element(
             raise RuntimeError(f"Could not read available {selection_label} elements.") from exception
     if element_name not in normalized_available_elements:
         raise RuntimeError(f"{selection_label} '{element_name}' is unavailable.")
-    mark_mutation()
-    com.invoke_method(selection_manager, "Activate", element_name)
-    return _get_required_property(selection_manager, "ActiveElement")
 
 
 def _set_and_verify_profile_property(target: Any, property_name: str, requested_value: Any, target_label: str) -> Any:

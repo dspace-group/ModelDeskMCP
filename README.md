@@ -26,11 +26,11 @@ uv sync
 uv run python -m modeldesk_mcp.smoke --skip-com-status
 ```
 
-uv creates and manages a project-local `.venv`; no manual activation is needed. Dependency installation requires access to your approved package index. See [docs/clients.md](docs/clients.md) for package-source and startup troubleshooting.
+uv creates and manages a project-local `.venv`; no manual activation is needed. Dependency installation requires access to public PyPI and its download hosts. See [docs/clients.md](docs/clients.md) for package-source and startup troubleshooting.
 
 ## MCP client configuration
 
-Add the following server entry to your VS Code MCP configuration. Keep unrelated entries in [.vscode/mcp.json](.vscode/mcp.json).
+Create your own local `.vscode/mcp.json` file and add the following server entry. Keep any other server entries. This checkout excludes personal MCP configuration from publication.
 
 ```json
 {
@@ -103,7 +103,7 @@ uv run python -m modeldesk_mcp.smoke --skip-com-status
 
 These checks are COM-free. Metadata flags exit after printing their result; use them to verify startup without opening a ModelDesk session. `uv build` can produce an sdist and wheel, but the checkout remains the documented deployment path.
 
-The lockfile pins dependencies. GitHub CI uses Windows, Python 3.14, and a job-scoped public PyPI index so that organization-local mirror URLs do not prevent hosted runners from installing packages. Local package policy is not changed by that CI setting.
+The lockfile pins dependencies from public PyPI. GitHub CI uses Windows, Python 3.14, and a job-scoped public PyPI index. This setting does not change local package configuration.
 
 The request path is MCPServer -> registry -> service -> COM gateway -> bounded STA dispatcher -> ModelDesk. See [docs/architecture.md](docs/architecture.md) and [docs/extending.md](docs/extending.md) for implementation details.
 

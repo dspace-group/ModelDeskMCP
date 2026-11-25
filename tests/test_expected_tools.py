@@ -6,6 +6,8 @@ import json
 import re
 from typing import Any
 
+import pytest
+
 from modeldesk_mcp.com_bridge.gateway import ModelDeskAutomationGateway
 from modeldesk_mcp.contracts import ModelDeskStatus, ParameterValueInfo, ToolResult, public_error_message
 from modeldesk_mcp.tools import EXPECTED_TOOL_NAMES, TOOL_DOMAIN_BY_NAME, TOOL_DOMAINS, register_tools
@@ -321,3 +323,38 @@ def test_real_mcp_schemas_document_inputs_and_share_tool_result_envelope() -> No
     assert schema_service.value_json == "[1,2,3]"
     assert vector_result.structured_content["data"]["parameterPath"] == "Vehicle.Speed"
     assert vector_result.structured_content["data"]["value"] == "[1,2,3]"
+
+
+def test_profile_tool_strict_segment_schema_and_native_forwarding() -> None:
+    from mcp.server.mcpserver.exceptions import ToolError
+    from mcp.server.mcpserver import MCPServer
+    from modeldesk_mcp.contracts.models import OperationInfo
+
+    class ProfileService:
+        def __init__(self) -> None:
+            self.calls: list[tuple[Any, ...]] = []
+
+        def set_maneuver_behavior_profiles(self, *args: Any) -> ToolResult:
+            self.calls.append(args)
+            return ToolResult.success("modeldesk_set_maneuver_behavior_profiles", "schema-test", OperationInfo("modeldesk_set_maneuver_behavior_profiles", True, "ok", {}))
+
+    service = ProfileService()
+    server = MCPServer("profile-schema-test")
+    register_tools(server, service)
+    tool = next(tool for tool in asyncio.run(server.list_tools()) if tool.name == "modeldesk_set_maneuver_behavior_profiles")
+    index = tool.input_schema["properties"]["segmentIndex"]
+    assert index["type"] == "integer"
+    assert index["default"] == 0 and index["minimum"] == 0 and index["maximum"] == 2147483647
+    assert "segmentIndex" not in tool.input_schema.get("required", [])
+    args = {"maneuverSelectorKind": "index", "maneuverSelectorValue": "0", "lateralProfileJson": {"LaneSelection": {"Constant": {"Constant": -1.0}}}}
+    result = asyncio.run(server.call_tool(tool.name, {**args, "segmentIndex": 1}))
+    assert not result.is_error
+    assert service.calls[-1][-1] == 1
+    assert json.loads(service.calls[-1][5]) == args["lateralProfileJson"]
+    result = asyncio.run(server.call_tool(tool.name, args))
+    assert not result.is_error and service.calls[-1][-1] == 0
+    call_count = len(service.calls)
+    for invalid in (True, None, "1", 1.0, -1, 2147483648):
+        with pytest.raises(ToolError):
+            asyncio.run(server.call_tool(tool.name, {**args, "segmentIndex": invalid}))
+        assert len(service.calls) == call_count

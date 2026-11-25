@@ -2,11 +2,15 @@
 
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
+import asyncio
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
+import tomllib
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -62,6 +66,23 @@ def test_metadata_cli_writes_exact_output(arguments: tuple[str, ...], expected: 
 
     assert result == 0
     assert stdout.getvalue() == f"{expected}\n"
+
+
+def test_create_app_initialize_version_matches_package_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mcp import ClientSession
+    from mcp.client._memory import InMemoryTransport
+    import modeldesk_mcp.com_bridge as com_bridge
+
+    monkeypatch.setattr(com_bridge, "ComStaDispatcher", object)
+    app = server.create_app()
+
+    async def initialize() -> str:
+        async with InMemoryTransport(app) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                result = await session.initialize()
+                return result.server_info.version
+
+    assert asyncio.run(initialize()) == __version__
 
 
 def test_list_tools_cli_matches_expected_order() -> None:
@@ -149,3 +170,86 @@ def test_skill_index_preserves_registry_order_within_each_domain() -> None:
         assert actual == expected
 
     assert set(TOOL_DOMAIN_BY_NAME.values()) == set(TOOL_DOMAINS)
+
+
+def test_public_checkout_excludes_personal_configuration_and_local_state() -> None:
+    """Keep private checkout state excluded without hiding the public product skill."""
+    root = SKILL_PATH.parents[3]
+    assert not (root / ".vscode" / "mcp.json").exists()
+    assert SKILL_PATH.is_file()
+    if not (root / ".git").exists() or shutil.which("git") is None:
+        pytest.skip("Shared ignore validation requires a Git checkout and Git.")
+    private_paths = (
+        ".vscode/mcp.json",
+        ".agent-runtime/example/state.json",
+        ".github/agents/example.agent.md",
+        ".github/tools/example.mjs",
+        ".github/skills/worker-handover/SKILL.md",
+        ".github/.preference.ini",
+        ".github/.learnings.json",
+        ".github/decisions.md",
+        ".github/graph.json",
+        ".github/graph.html",
+        "docs/live-modeldesk-qa.md",
+        "problems.md",
+        ".env.local",
+        "credentials.json",
+        "secrets.json",
+    )
+    result = subprocess.run(
+        ["git", "-c", "core.excludesFile=NUL", "check-ignore", "--no-index", "-v", "-z", "--stdin"],
+        cwd=root,
+        input="\0".join(private_paths) + "\0",
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    matches = result.stdout.rstrip("\0").split("\0")
+    assert len(matches) == 4 * len(private_paths)
+    assert all(source == ".gitignore" for source in matches[::4])
+    public_skill = subprocess.run(
+        ["git", "-c", "core.excludesFile=NUL", "check-ignore", "--no-index", "--",
+         ".github/skills/modeldesk-mcp-tools/SKILL.md"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert public_skill.returncode == 1
+    assert public_skill.stdout == ""
+
+
+def test_public_setup_docs_use_local_configuration_without_private_config_links() -> None:
+    """Retain usable product examples after removing the personal config file."""
+    root = SKILL_PATH.parents[3]
+    for relative in ("README.md", "docs/clients.md"):
+        document = (root / relative).read_text(encoding="utf-8")
+        assert not re.search(r"\]\((?:\.\./)?\.vscode/mcp\.json\)", document)
+        assert "organization-local mirror" not in document
+        assert '"modeldesk-mcp"' in document
+        assert '"${workspaceFolder}\\\\ModelDeskMCP.cmd"' in document
+        assert "modeldesk://workflow-catalog" in document
+
+
+def test_public_lock_uses_pypi_and_hashed_public_artifacts() -> None:
+    """Reject private package sources without starting uv or installing dependencies."""
+    with (SKILL_PATH.parents[3] / "uv.lock").open("rb") as lock_file:
+        lock = tomllib.load(lock_file)
+    root_package = next(package for package in lock["package"] if package["name"] == "modeldesk-mcp")
+    assert root_package["version"] == __version__
+    assert root_package["source"] == {"editable": "."}
+    for package in lock["package"]:
+        if package is root_package:
+            continue
+        assert package["source"] == {"registry": "https://pypi.org/simple"}
+        artifacts = package.get("wheels", []) + ([package["sdist"]] if "sdist" in package else [])
+        assert artifacts
+        for artifact in artifacts:
+            address = urlsplit(artifact["url"])
+            assert address.scheme == "https"
+            assert address.hostname == "files.pythonhosted.org"
+            assert address.username is None and address.password is None
+            assert address.path.startswith("/packages/")
+            assert re.fullmatch(r"sha256:[a-f0-9]{64}", artifact["hash"])
+            assert isinstance(artifact["size"], int) and artifact["size"] > 0

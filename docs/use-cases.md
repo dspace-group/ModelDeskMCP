@@ -4,7 +4,7 @@
 
 These workflows describe the current MCP tool surface, not every feature available in the ModelDesk UI. Use [tools.md](tools.md) for the complete inventory and inspect capabilities before assuming a domain is usable.
 
-Example names, paths, and indices are illustrative. Replace them with values from your active project and fresh listings. The JSON blocks are tool arguments, not commands that run automatically; fields ending in `Json` intentionally contain serialized JSON strings.
+Example names, paths, and indices are illustrative. Replace them with values from your active project and fresh listings. The JSON blocks are tool arguments, not commands that run automatically. Fields ending in `Json` use the native JSON type shown in the tool schema. Pass objects and arrays directly; do not wrap them in JSON strings.
 
 ## Before Any Workflow
 
@@ -40,7 +40,7 @@ Arguments for `modeldesk_set_parameter_value`:
 {
 	"parameterPath": "Vehicle.Speed",
 	"valueKind": "Scalar",
-	"valueJson": "1200.0"
+	"valueJson": 1200.0
 }
 ```
 
@@ -71,7 +71,7 @@ Arguments for `modeldesk_create_basic_road` in the already-active network:
 	"leftLaneCount": 1,
 	"rightLaneCount": 1,
 	"laneWidth": 3.5,
-	"trafficObjectsJson": "[]",
+	"trafficObjectsJson": [],
 	"save": false,
 	"download": false
 }
@@ -123,8 +123,11 @@ Arguments for `modeldesk_set_maneuver_behavior_profiles` targeting an ego maneuv
 	"fellowSelectorValue": "active",
 	"maneuverSelectorKind": "index",
 	"maneuverSelectorValue": "0",
-	"longitudinalProfileJson": "{\"StartPosition\":70.0,\"InitialLongitudinalVelocity\":20.0}",
-	"lateralProfileJson": "{}",
+	"longitudinalProfileJson": {
+		"StartPosition": 70.0,
+		"InitialLongitudinalVelocity": 20.0
+	},
+	"lateralProfileJson": {},
 	"save": false,
 	"download": false
 }
@@ -142,16 +145,23 @@ Fellows require explicit nested behavior-profile JSON. Arguments for `modeldesk_
 	"fellowSelectorValue": "Traffic1",
 	"maneuverSelectorKind": "index",
 	"maneuverSelectorValue": "0",
-	"longitudinalProfileJson": "{\"Velocity\":{\"Constant\":{\"Constant\":20.0}}}",
-	"lateralProfileJson": "{}",
+	"segmentIndex": 1,
+	"longitudinalProfileJson": {
+		"Velocity": {"Constant": {"Constant": 20.0}}
+	},
+	"lateralProfileJson": {"LaneSelection": {"Constant": {"Constant": -1.0}}},
 	"save": false,
 	"download": false
 }
 ```
 
-The alternative Position payload is `{"Position":{"YawAngleConstant":{"Constant":70.0}}}`. Both target the first segment's longitudinal behavior. Position and Velocity are mutually exclusive alternatives; activating one changes the longitudinal mode. They are not aliases for ego initial values, and submitting either ego-only field for a Fellow is rejected before COM traversal.
+The alternative Position payload is `{"Position":{"YawAngleConstant":{"Constant":70.0}}}`. Position and Velocity select alternative longitudinal profiles on the selected segment. They are not ego initial values. The tool rejects ego-only fields for a Fellow before COM access.
 
-Verify `data.details.longitudinalPosition` or `data.details.longitudinalVelocity` on a successful response. Lateral behavior has no universal schema; leave `lateralProfileJson` as `{}` unless the exact selected interface is verified.
+`segmentIndex` is the zero-based position in the Fellow sequence. It defaults to `0`. It must be an integer from `0` to `2147483647` and must identify an existing segment. The ego accepts only `0`.
+
+The only supported Fellow lateral payload is `{"LaneSelection":{"Constant":{"Constant":-1.0}}}`. Use a finite number. An integer must be exactly representable as a COM double. The value is a native scalar; no physical unit or sign convention is established. The tool does not use the former generic sequence-level Fellow lateral fallback. Profile availability depends on the selected ModelDesk instance.
+
+Check `data.details.segmentIndex`, `data.details.longitudinalPosition` or `data.details.longitudinalVelocity`, and `data.details.lateralLaneSelection` in the successful response. Readback confirms the scalar value, not vehicle movement. A failure after activation can leave partial in-memory changes. The tool does not save or download after a failed readback.
 
 ### Ordering and References
 
@@ -196,8 +206,8 @@ Arguments for `modeldesk_compare_captures`:
 {
 	"referenceCapture": "reference.mat",
 	"candidateCapture": "candidate.mat",
-	"signalSpecsJson": "[\"Vehicle.Speed\"]",
-	"tolerancesJson": "{\"rootMeanSquaredError\":0.1}"
+	"signalSpecsJson": ["Vehicle.Speed"],
+	"tolerancesJson": {"rootMeanSquaredError": 0.1}
 }
 ```
 

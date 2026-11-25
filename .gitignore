@@ -40,9 +40,7 @@ private*/
 .generated*/
 
 # Local editor and OS state
-.vscode/*
-!.vscode/mcp.json
-.vscode/settings.json
+.vscode/
 .DS_Store
 Thumbs.db
 Desktop.ini
@@ -57,3 +55,32 @@ Desktop.ini
 *.tmp
 *.bak
 .tmp-*/
+/.specs
+
+# Private automation and evidence; the ModelDesk product skill stays public.
+/.agent-runtime/
+/.github/agents/
+/.github/tools/
+/.github/skills/*
+!/.github/skills/modeldesk-mcp-tools/
+/.github/.preference.ini
+/.github/.learnings.json
+/.github/decisions.md
+/.github/graph.json
+/.github/graph.html
+/.github/graph.json.lock
+/.cursor/
+/.claude/
+/Framework/
+/docs/live-modeldesk-qa.md
+/problems.md
+
+# Personal connections and credential material must not enter publication.
+**/mcp.json
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+secrets*.json

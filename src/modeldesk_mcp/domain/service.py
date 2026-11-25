@@ -377,8 +377,8 @@ class ModelDeskService:
             fellow_selector = Selector.active()
         return self._gateway.verify_scenario_maneuver_sequence(fellow_selector, maneuver_selectors_json)
 
-    def set_maneuver_behavior_profiles(self, fellow_selector_kind: str | None, fellow_selector_value: str | None, maneuver_selector_kind: str, maneuver_selector_value: str, longitudinal_profile_json: str | None, lateral_profile_json: str | None, save: bool, download: bool) -> ToolResult:
-        """Set maneuver behavior profiles."""
+    def set_maneuver_behavior_profiles(self, fellow_selector_kind: str | None, fellow_selector_value: str | None, maneuver_selector_kind: str, maneuver_selector_value: str, longitudinal_profile_json: str | None, lateral_profile_json: str | None, save: bool, download: bool, segment_index: int = 0) -> ToolResult:
+        """Set and verify profiles on the selected Fellow segment or ego sequence."""
 
         fellow_selector = self._create_optional_selector("modeldesk_set_maneuver_behavior_profiles", fellow_selector_kind, fellow_selector_value)
         if isinstance(fellow_selector, ToolResult):
@@ -388,7 +388,7 @@ class ModelDeskService:
         maneuver_selector = self._create_selector("modeldesk_set_maneuver_behavior_profiles", maneuver_selector_kind, maneuver_selector_value)
         if isinstance(maneuver_selector, ToolResult):
             return maneuver_selector
-        return self._gateway.set_maneuver_behavior_profiles(fellow_selector, maneuver_selector, longitudinal_profile_json, lateral_profile_json, save, download)
+        return self._gateway.set_maneuver_behavior_profiles(fellow_selector, maneuver_selector, longitudinal_profile_json, lateral_profile_json, save, download, segment_index)
 
     def get_scenario_road(self) -> ToolResult:
         """Return the road reference on the active traffic scenario."""

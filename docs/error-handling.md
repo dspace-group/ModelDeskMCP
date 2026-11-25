@@ -69,7 +69,7 @@ For example, a changed maneuver order is rejected with an unsupported-reordering
 
 ## Validation and JSON Inputs
 
-The MCP `tools/list` schema describes parameters, defaults, and verified examples. Values ending in `Json` are JSON-encoded strings; malformed JSON is not a property patch. Project-specific test names have no universal example.
+The MCP `tools/list` schema describes parameters, defaults, and verified examples. Fields ending in `Json` use the native JSON type shown in that schema. Pass objects and arrays directly; do not wrap them in strings. A field that expects text can still use a JSON string. Project-specific test names have no universal example.
 
 Typed request validation catches many errors before COM traversal, including non-finite numeric values, unsupported road fields, and ego-only initial fields submitted for a Fellow. Other checks require the selected live object, so validation is not a universal guarantee of zero COM access.
 
@@ -80,6 +80,8 @@ Use explicit selectors from fresh listings. Support for `active`, names, and ind
 There is no transaction or automatic rollback around a multi-step ModelDesk operation. A later assignment, readback, Save, or Download failure can leave earlier in-memory changes in place.
 
 `save=false` and `download=false` suppress those follow-up operations; they do not make editing tools read-only. Profile updates read back their assigned values before persistence, but a successful assignment followed by a readback error can still have changed the object.
+
+For Fellow profiles, the tool checks both requested top-level managers before activation. A source may become accessible only after its profile is active. If a later check fails, the activation can remain in memory. A failed Save prevents Download. A failed Download after a successful Save does not undo the Save.
 
 After a failed mutation:
 

@@ -8,7 +8,7 @@ from modeldesk_mcp import __version__
 
 
 def create_app() -> "MCPServer":
-    """Create a configured MCPServer instance."""
+    """Create an MCPServer that reports the package version during initialization."""
 
     from mcp.server.mcpserver import MCPServer
 
@@ -23,7 +23,7 @@ def create_app() -> "MCPServer":
     gateway = ModelDeskAutomationGateway(dispatcher, options)
     workflows = WorkflowCatalog()
     service = ModelDeskService(gateway, workflows)
-    mcp = MCPServer("ModelDesk Automation")
+    mcp = MCPServer("ModelDesk Automation", version=__version__)
     register_tools(mcp, service)
     register_resources(mcp, workflows)
     return mcp

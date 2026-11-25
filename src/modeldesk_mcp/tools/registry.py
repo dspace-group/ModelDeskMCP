@@ -703,7 +703,7 @@ _INPUT_FIELD_METADATA: dict[str, tuple[str, tuple[Any, ...] | None]] = {
     "laneSectionIndex": ("Zero-based lane-section index in the selected road.", (0,)),
     "laneSectionLength": ("Requested lane-section length in meters; 0.0 selects the operation's automatic length behavior.", (0.0,)),
     "laneWidth": ("Lane width in meters.", (3.5,)),
-    "lateralProfileJson": ("Object of COM-defined lateral assignments; {} requests no lateral changes because this interface has no universal lateral schema.", ({},)),
+    "lateralProfileJson": ("Fellow: only LaneSelection.Constant.Constant is supported as a finite, exactly representable native number. Ego: existing lateral scalar assignments. Null or {} requests no lateral changes.", ({}, {"LaneSelection": {"Constant": {"Constant": -1.0}}})),
     "limit": ("Maximum number of signal comparisons returned in this page; capped by MODELDESK_MCP_MAX_COLLECTION_ITEMS.", (100,)),
     "leftLaneCount": ("Number of left-side lanes to configure.", (1,)),
     "length": ("Road or segment length in meters, as supported by the selected operation.", (100.0,)),
@@ -792,6 +792,8 @@ def _documented_tool_registrar(mcp: Any) -> Any:
                     if parameter_name not in _INPUT_FIELD_METADATA:
                         raise ValueError(f"Missing input schema metadata for {name}.{parameter_name}.")
                     description, examples = _INPUT_FIELD_METADATA[parameter_name]
+                    if name == "modeldesk_set_maneuver_behavior_profiles" and parameter_name == "segmentIndex":
+                        description = "Zero-based Fellow segment position; ego requires 0."
                     field_metadata: dict[str, Any] = {"description": description}
                     field_metadata.update(_INPUT_FIELD_CONSTRAINTS.get(parameter_name, {}))
                     if examples is not None:
@@ -1214,10 +1216,10 @@ def register_tools(mcp: Any, service: ModelDeskService) -> None:
         return _to_dict(service.verify_scenario_maneuver_sequence(fellowSelectorKind, fellowSelectorValue, _json_payload_text(maneuverSelectorsJson)))
 
     @mcp.tool(name="modeldesk_set_maneuver_behavior_profiles")
-    def modeldesk_set_maneuver_behavior_profiles(*, fellowSelectorKind: str | None = None, fellowSelectorValue: str | None = None, maneuverSelectorKind: str, maneuverSelectorValue: str, longitudinalProfileJson: JsonObject | None = None, lateralProfileJson: JsonObject | None = None, save: bool = False, download: bool = False) -> dict[str, Any]:
-        """Apply and read back maneuver values. Only the ego (active) supports StartPosition (Start position on route, m) and InitialLongitudinalVelocity (km/h). Fellows do not have these initial properties; their JSON must explicitly select {"Position":{"YawAngleConstant":{"Constant":70.0}}} or {"Velocity":{"Constant":{"Constant":20.0}}} on the first segment. These are mutually exclusive behavior profiles, not ego initial fields. Fellow creation requires no yaw or profile values. Verify longitudinalPosition or longitudinalVelocity before persistence."""
+    def modeldesk_set_maneuver_behavior_profiles(*, fellowSelectorKind: str | None = None, fellowSelectorValue: str | None = None, maneuverSelectorKind: str, maneuverSelectorValue: str, longitudinalProfileJson: JsonObject | None = None, lateralProfileJson: JsonObject | None = None, save: bool = False, download: bool = False, segmentIndex: Annotated[int, Field(strict=True, ge=0, le=2147483647)] = 0) -> dict[str, Any]:
+        """Apply and read back maneuver values before persistence. Ego supports StartPosition (m) and InitialLongitudinalVelocity (km/h), with segmentIndex 0. Fellows select a zero-based segment and one longitudinal Position.YawAngleConstant.Constant or Velocity.Constant.Constant profile. Fellow lateral input supports only LaneSelection.Constant.Constant; its native scalar has no established unit. The former sequence-level Fellow lateral fallback is not supported. Failures after activation may leave partial in-memory changes."""
 
-        return _to_dict(service.set_maneuver_behavior_profiles(fellowSelectorKind, fellowSelectorValue, maneuverSelectorKind, maneuverSelectorValue, _json_payload_text(longitudinalProfileJson or {}), _json_payload_text(lateralProfileJson or {}), save, download))
+        return _to_dict(service.set_maneuver_behavior_profiles(fellowSelectorKind, fellowSelectorValue, maneuverSelectorKind, maneuverSelectorValue, _json_payload_text(longitudinalProfileJson or {}), _json_payload_text(lateralProfileJson or {}), save, download, segmentIndex))
 
     @mcp.tool(name="modeldesk_get_scenario_road")
     def modeldesk_get_scenario_road() -> dict[str, Any]:

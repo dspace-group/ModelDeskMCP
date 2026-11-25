@@ -2,6 +2,8 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from modeldesk_mcp.com_bridge.gateway import ModelDeskAutomationGateway
 from modeldesk_mcp.com_bridge.dispatcher import ComStaDispatcher
 from modeldesk_mcp.config import ComGatewayOptions
@@ -189,7 +191,7 @@ def test_catalog_readback_and_mutation_capability_match_registered_api() -> None
     object_removed = gateway.remove_traffic_object(Selector.create("id", "vehicle-1"))
 
     assert capabilities.ok
-    assert capabilities.to_dict()["data"]["domains"]["trafficObjectCatalogMutation"] is False
+    assert capabilities.to_dict()["data"]["domains"]["trafficObjectCatalogMutation"] is True
     assert [item["name"] for item in objects.to_dict()["data"]["items"]] == ["PassengerCar"]
     assert [item["name"] for item in folders.to_dict()["data"]["items"]] == ["Vehicles"]
     assert reference.ok
@@ -204,3 +206,95 @@ def test_catalog_readback_and_mutation_capability_match_registered_api() -> None
     assert object_removed.ok
     assert manager.add_calls == [("Truck", "Truck.dae")]
     assert manager.remove_calls == [("folder", "StaticAssets"), ("object", "vehicle-1")]
+
+
+def test_catalog_mutation_capability_recognizes_native_modeldesk_27_1_methods() -> None:
+    class NativeCatalogManager:
+        TrafficObjects = _CatalogCollection([])
+        Folders = _CatalogCollection([SimpleNamespace(Name="Vehicles", Path="Vehicles")])
+
+        def AddTrafficObject(self, name, object3d):
+            raise AssertionError("Capability discovery must not author objects")
+
+        def RemoveTrafficObject(self, object_id):
+            raise AssertionError("Capability discovery must not remove objects")
+
+        def AddFolder(self, name):
+            raise AssertionError("Capability discovery must not author folders")
+
+        def RemoveFolder(self, name):
+            raise AssertionError("Capability discovery must not remove folders")
+
+    gateway = object.__new__(ModelDeskAutomationGateway)
+    gateway._dispatcher = _InlineDispatcher()
+    gateway._options = ComGatewayOptions()
+    gateway._session_id = "native-27-1-capability-regression"
+    gateway._application = SimpleNamespace(
+        ActiveProject=SimpleNamespace(TrafficObjectManager=NativeCatalogManager())
+    )
+
+    result = gateway.get_capabilities()
+
+    assert result.ok
+    assert result.to_dict()["data"]["domains"]["trafficObjectInspection"] is True
+    assert result.to_dict()["data"]["domains"]["trafficObjectCatalogMutation"] is True
+    assert not any("not yet exposed as MCP tools" in message for message in result.to_dict()["data"]["disabledCapabilities"])
+
+
+@pytest.mark.parametrize("method_name", ["AddTrafficObject", "RemoveTrafficObject", "AddFolder", "RemoveFolder"])
+@pytest.mark.parametrize("failure", ["missing", "noncallable", "inaccessible"])
+def test_catalog_mutation_capability_requires_every_accessible_callable(method_name, failure) -> None:
+    def mutator(*args):
+        raise AssertionError("Capability discovery must not invoke mutators")
+
+    def unavailable(instance):
+        raise RuntimeError("COM member unavailable")
+
+    methods = {name: mutator for name in ("AddTrafficObject", "RemoveTrafficObject", "AddFolder", "RemoveFolder")}
+    if failure == "missing":
+        del methods[method_name]
+    elif failure == "noncallable":
+        methods[method_name] = "not callable"
+    else:
+        del methods[method_name]
+
+    manager_type = type("CatalogManager", (), {method_name: property(unavailable)} if failure == "inaccessible" else {})
+    manager = manager_type()
+    for name, method in methods.items():
+        setattr(manager, name, method)
+
+    gateway = object.__new__(ModelDeskAutomationGateway)
+    gateway._dispatcher = _InlineDispatcher()
+    gateway._options = ComGatewayOptions()
+    gateway._session_id = "incomplete-catalog"
+    gateway._application = SimpleNamespace(ActiveProject=SimpleNamespace(TrafficObjectManager=manager))
+
+    result = gateway.get_capabilities()
+
+    assert result.ok
+    assert result.to_dict()["data"]["domains"]["trafficObjectInspection"] is True
+    assert result.to_dict()["data"]["domains"]["trafficObjectCatalogMutation"] is False
+    assert any("requires an accessible manager" in message for message in result.to_dict()["data"]["disabledCapabilities"])
+
+
+@pytest.mark.parametrize("failure", ["missing_project", "missing_manager", "inaccessible_manager"])
+def test_catalog_mutation_capability_handles_unavailable_manager(failure) -> None:
+    class InaccessibleProject:
+        @property
+        def TrafficObjectManager(self):
+            raise RuntimeError("COM manager unavailable")
+
+    project = InaccessibleProject() if failure == "inaccessible_manager" else SimpleNamespace()
+    application = SimpleNamespace() if failure == "missing_project" else SimpleNamespace(ActiveProject=project)
+    gateway = object.__new__(ModelDeskAutomationGateway)
+    gateway._dispatcher = _InlineDispatcher()
+    gateway._options = ComGatewayOptions()
+    gateway._session_id = "unavailable-catalog"
+    gateway._application = application
+
+    result = gateway.get_capabilities()
+
+    assert result.ok
+    assert result.to_dict()["data"]["domains"]["trafficObjectInspection"] is False
+    assert result.to_dict()["data"]["domains"]["trafficObjectCatalogMutation"] is False
+    assert any("requires an accessible manager" in message for message in result.to_dict()["data"]["disabledCapabilities"])

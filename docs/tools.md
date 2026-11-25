@@ -122,7 +122,7 @@ Segment inputs use zero-based collection indices even when a returned COM `Index
 | `modeldesk_update_scenario_maneuver` | Patch the selected ego maneuver or Fellow sequence. | Edit |
 | `modeldesk_remove_scenario_maneuver` | Remove a selected maneuver/sequence; use a freshly listed index for Fellow sequences. | Edit |
 | `modeldesk_verify_scenario_maneuver_sequence` | Compare a requested order with the immutable current sequence; no changes are applied. | Inspect |
-| `modeldesk_set_maneuver_behavior_profiles` | Set and read back ego initial values or one explicit Fellow behavior profile. | Edit |
+| `modeldesk_set_maneuver_behavior_profiles` | Set and read back ego initial values or selected Fellow segment profiles. | Edit |
 | `modeldesk_get_scenario_road` | Inspect the active scenario's referenced road, subject to available identity fields. | Inspect |
 | `modeldesk_set_scenario_road` | Assign a listed road by name to the active scenario. | Edit |
 | `modeldesk_list_fellow_activities` | Discover activities/sequences in the selected Fellow or ego scope. | Inspect |
@@ -133,7 +133,9 @@ Segment inputs use zero-based collection indices even when a returned COM `Index
 | `modeldesk_stop_maneuver` | Stop maneuver execution. | Runtime |
 | `modeldesk_reset_maneuver` | Reset maneuver execution to its initial condition. | Runtime |
 
-Fellow creation does not require yaw or behavior-profile values. `StartPosition` (Start position on route, meters) and `InitialLongitudinalVelocity` (km/h) belong only to the ego maneuver sequence. Fellow payloads must explicitly select either `Position.YawAngleConstant.Constant` or `Velocity.Constant.Constant`; these are alternative profiles, not aliases for ego initial fields. See [use-cases.md](use-cases.md) for payload examples.
+Fellow creation does not require yaw or behavior-profile values. `StartPosition` (Start position on route, meters) and `InitialLongitudinalVelocity` (km/h) belong only to the ego maneuver sequence. Fellow payloads select either `Position.YawAngleConstant.Constant` or `Velocity.Constant.Constant`. These are alternative profiles, not ego initial fields.
+
+`segmentIndex` selects a zero-based Fellow segment and defaults to `0`. The ego accepts only `0`. Fellow lateral input supports only `{"LaneSelection":{"Constant":{"Constant":-1.0}}}`. Its finite scalar has no established unit. Integers must be exactly representable as COM doubles. The former generic sequence-level Fellow lateral fallback is not supported. See [use-cases.md](use-cases.md) for payload examples and readback details.
 
 Fellow maneuver deletion by plain name is currently unreliable; use the index returned by a fresh activities listing. Vehicle-type listings can contain placeholder labels, and scenario-road identity fields can be null; do not invent paths or report those incomplete fields as verified references.
 
@@ -171,13 +173,13 @@ Inspect capability flags before catalog mutations. An empty catalog or disabled 
 | `modeldesk_list_plot_layouts` | List plot layouts in the active plotting configuration. | Inspect |
 | `modeldesk_compare_captures` | Compare two project Measurements MAT files using selected signals and numeric tolerances; comparison rows are paginated. | Analyze |
 
-Test activation and execution need installed test content and any required runtime setup. Plot capture listing and capture comparison are separate operations: comparison uses capture filenames in the active project's Measurements folder, not arbitrary external paths. Signal specs and tolerances are JSON-encoded arguments. The comparison `signalSet` returns counts only (`commonCount`, `onlyReferenceCount`, and `onlyCandidateCount`); `comparisons` is paginated by `offset` and `limit`.
+Test activation and execution need installed test content and any required runtime setup. Plot capture listing and capture comparison are separate operations: comparison uses capture filenames in the active project's Measurements folder, not arbitrary external paths. Signal specs use a JSON array; tolerances use a JSON object. The comparison `signalSet` returns counts only (`commonCount`, `onlyReferenceCount`, and `onlyCandidateCount`); `comparisons` is paginated by `offset` and `limit`.
 
 ## Inputs and Results
 
 Selectors normally use `index` or `name`, with index values supplied as decimal strings. `active` is accepted only in scopes that support it; for Fellow selectors it identifies the ego. Do not assume selector support is identical across tools.
 
-Arguments ending in `Json` contain serialized JSON, not a nested MCP argument object. For example, an ego profile request uses `"longitudinalProfileJson": "{\"StartPosition\":70.0,\"InitialLongitudinalVelocity\":20.0}"`.
+Arguments ending in `Json` use the native JSON type shown in `tools/list`. Pass objects and arrays directly; do not wrap them in strings. A field that expects text can still use a JSON string. For example, pass `longitudinalProfileJson` as `{"StartPosition":70.0,"InitialLongitudinalVelocity":20.0}`.
 
 All tools return `ok`, `operation`, `sessionId`, `data`, `warnings`, `artifacts`, and `error`. Domain summaries and mutation details have operation-specific shapes. A registered name does not guarantee a live domain is available; check capabilities, actual results, and [error-handling.md](error-handling.md).
 

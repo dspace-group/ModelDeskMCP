@@ -205,9 +205,9 @@ class ManeuverBehaviorProfileRequest:
         Active (ego) longitudinal values are direct sequence-owned finite numbers. Fellow
         values must explicitly select Position.YawAngleConstant or Velocity.Constant
         behavior profiles; these are not aliases for the ego-only initial properties.
-        A fellow segment supports only one longitudinal profile. Lateral scalar assignments
-        retain their shape. This method has no COM side effects and raises ValueError for
-        malformed, ambiguous, or empty requests.
+        A fellow segment supports only one longitudinal profile and the bounded
+        LaneSelection.Constant.Constant lateral shape. Ego lateral scalar assignments
+        retain their existing shape. Invalid requests raise ValueError before COM access.
         """
 
         if fellow_selector is None:
@@ -220,9 +220,10 @@ class ManeuverBehaviorProfileRequest:
 
         if fellow_selector.by == SelectorKind.ACTIVE:
             _validate_ego_maneuver_properties(longitudinal)
+            _validate_scalar_property_object(lateral, "lateralProfileJson", 0)
         else:
             longitudinal = _validate_fellow_longitudinal_properties(longitudinal)
-        _validate_scalar_property_object(lateral, "lateralProfileJson", 0)
+            _validate_fellow_lateral_properties(lateral)
 
         if not longitudinal and not lateral:
             raise ValueError("At least one longitudinal or lateral profile property must be provided.")
@@ -898,6 +899,21 @@ def _validate_maneuver_number(value: Any, parameter_name: str) -> None:
         raise ValueError(f"{parameter_name} is outside the supported finite range.") from exc
     if not is_finite:
         raise ValueError(f"{parameter_name} must be a finite JSON number.")
+
+
+def _validate_fellow_lateral_properties(properties: dict[str, Any]) -> None:
+    if not properties:
+        return
+    profile = properties.get("LaneSelection")
+    if set(properties) != {"LaneSelection"} or not isinstance(profile, dict):
+        raise ValueError("Fellow lateralProfileJson must select only LaneSelection.")
+    source = profile.get("Constant")
+    if set(profile) != {"Constant"} or not isinstance(source, dict) or set(source) != {"Constant"}:
+        raise ValueError("LaneSelection must select only Constant.Constant.")
+    value = source["Constant"]
+    _validate_maneuver_number(value, "lateralProfileJson.LaneSelection.Constant.Constant")
+    if isinstance(value, int) and int(float(value)) != value:
+        raise ValueError("The lateral Constant integer must be exactly representable as a COM double.")
 
 
 def _validate_scalar_property_object(data: dict[str, Any], parameter_name: str, depth: int) -> None:

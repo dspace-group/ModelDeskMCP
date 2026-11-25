@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from types import SimpleNamespace
 from typing import Any
@@ -37,6 +38,19 @@ def test_set_scenario_road_rejects_whitespace_only_road_name() -> None:
     assert not result.ok
     assert result.error is not None
     assert result.error.error_type == "validation"
+
+
+def test_get_scenario_road_preserves_plain_string_reference() -> None:
+    scenario = SimpleNamespace(Road="Road 1")
+    gateway = _gateway_for_application(
+        SimpleNamespace(ActiveProject=SimpleNamespace(ActiveExperiment=SimpleNamespace(TrafficScenario=scenario)))
+    )
+
+    result = gateway.get_scenario_road()
+
+    assert result.ok
+    details = result.to_dict()["data"]["details"]
+    assert details == {"Name": "Road 1", "Path": None, "FileName": None, "CompleteName": None}
 
 
 def test_set_vehicle_object_type_rejects_negative_element_index() -> None:
@@ -123,6 +137,9 @@ class _FakeGateway:
     def set_vehicle_object_type(self, fellow_selector: Selector, maneuver_index: int, element_index: int, save: bool, download: bool) -> ToolResult:
         return self._record("set_vehicle_object_type", fellow_selector, maneuver_index, element_index, save, download)
 
+    def set_maneuver_behavior_profiles(self, *args: Any) -> ToolResult:
+        return self._record("set_maneuver_behavior_profiles", *args)
+
 
 def _make_service(fake_gateway: _FakeGateway) -> Any:
     from modeldesk_mcp.domain.service import ModelDeskService
@@ -195,6 +212,14 @@ def test_service_get_vehicle_object_type_routes_maneuver_index() -> None:
     assert args[1] == 3
 
 
+def test_service_forwards_profile_segment_index_and_default() -> None:
+    fake = _FakeGateway()
+    service = _make_service(fake)
+    service.set_maneuver_behavior_profiles("index", "0", "index", "0", "{}", "{}", False, False, 1)
+    service.set_maneuver_behavior_profiles("index", "0", "index", "0", "{}", "{}", False, False)
+    assert [args[-1] for _, args in fake.calls] == [1, 0]
+
+
 def test_set_vehicle_object_type_rejects_invalid_fellow_selector() -> None:
     fake = _FakeGateway()
     service = _make_service(fake)
@@ -233,6 +258,16 @@ def test_summarize_type_elements_builds_domain_summary_from_list() -> None:
     assert len(result.items) == 2
     assert result.items[0].index == 0
     assert result.items[1].index == 1
+
+
+def test_summarize_type_elements_preserves_plain_string_names() -> None:
+    from modeldesk_mcp.com_bridge.gateway import _summarize_type_elements
+
+    element = r"Vehicles\US_Sedan_A.tro"
+    result = _summarize_type_elements("scenarios.objectTypes.ego", [element], "object type", 500)
+
+    assert result.items[0].name == element
+    assert result.items[0].path is None
 
 
 def test_summarize_type_elements_truncates_at_max_items() -> None:
@@ -446,9 +481,14 @@ def test_scenario_removal_dry_runs_do_not_mutate_or_persist() -> None:
     assert events == []
 
 
+def _fake_profile_ole_object(interface_name: str) -> Any:
+    return SimpleNamespace(GetTypeInfo=lambda: SimpleNamespace(GetDocumentation=lambda index: (interface_name,)))
+
+
 class _FakeProfileValue:
     def __init__(self, name: str, constant: float, events: list[tuple[str, str]]) -> None:
         self.name = name
+        self._oleobj_ = _fake_profile_ole_object("IMAYawAngleConstant" if name == "position" else "IMAConstant")
         self._constant = constant
         self.readback_override: float | None = None
         self.readback_error: Exception | None = None
@@ -493,21 +533,26 @@ class _FakeProfileSelection:
         return self.ActiveElement
 
 
-def _make_fellow_profile_context() -> SimpleNamespace:
-    events: list[tuple[str, str]] = []
+def _make_fellow_profile_context(events: list[tuple[str, str]] | None = None) -> SimpleNamespace:
+    if events is None:
+        events = []
     velocity_value = _FakeProfileValue("velocity", 25.0, events)
     position_value = _FakeProfileValue("position", 0.0, events)
     velocity_source = _FakeProfileSelection("velocity-source", {"Constant": velocity_value}, "Constant", events)
-    velocity_profile = type("FakeVelocityProfile", (), {"SourceType": velocity_source})()
+    velocity_profile = type("FakeVelocityProfile", (), {"SourceType": velocity_source, "_oleobj_": _fake_profile_ole_object("IMAFellowVelocity")})()
     position_source = _FakeProfileSelection("source", {"YawAngleConstant": position_value}, "YawAngleConstant", events)
-    position_profile = type("FakePositionProfile", (), {"SourceType": position_source})()
+    position_profile = type("FakePositionProfile", (), {"SourceType": position_source, "_oleobj_": _fake_profile_ole_object("IMAPosition")})()
     longitudinal_profile = _FakeProfileSelection(
         "longitudinal",
         {"Velocity": velocity_profile, "Position": position_profile},
         "Velocity",
         events,
     )
-    activity = type("FakeFellowActivity", (), {"LongitudinalType": longitudinal_profile})()
+    lateral_value = _FakeProfileValue("lateral", 0.0, events)
+    lateral_source = _FakeProfileSelection("lateral-source", {"Constant": lateral_value}, "Constant", events)
+    lateral_profile = type("FakeLaneSelection", (), {"SourceType": lateral_source, "_oleobj_": _fake_profile_ole_object("IMALaneSelection")})()
+    lateral_type = _FakeProfileSelection("lateral-type", {"LaneSelection": lateral_profile}, "LaneSelection", events)
+    activity = type("FakeFellowActivity", (), {"LongitudinalType": longitudinal_profile, "LateralType": lateral_type})()
     segment = type("FakeFellowSegment", (), {"Activity": activity})()
     sequence = type("FakeFellowSequence", (), {"Segments": _FakeComCollection([segment])})()
     fellow = type("FakeFellow", (), {"Name": "", "Sequences": _FakeComCollection(add_factory=lambda: sequence)})()
@@ -545,9 +590,133 @@ def _make_fellow_profile_context() -> SimpleNamespace:
         velocity_source_type=velocity_source,
         velocity_value=velocity_value,
         position_value=position_value,
+        activity=activity,
+        lateral_type=lateral_type,
+        lateral_source=lateral_source,
+        lateral_value=lateral_value,
         events=events,
         save_calls=save_calls,
     )
+
+
+@pytest.mark.parametrize("operation", ("update", "profile", "remove_preview"))
+def test_fellow_maneuver_name_selectors_resolve_native_numeric_only_sequences(operation: str) -> None:
+    context = _make_fellow_profile_context()
+    fellow = context.fellows.Add()
+    fellow.Name = "OwnedFellow"
+    sequence = fellow.Sequences.Add()
+    sequence.Name = "DiscoveredSequence"
+    sequence.Comment = "initial"
+    sequence.Segments.items.append(_make_fellow_profile_context().sequence.Segments.Item(0))
+    assert not hasattr(sequence, "Index")
+
+    def invoke(selector: Selector, value: str) -> ToolResult:
+        if operation == "update":
+            return context.gateway.update_scenario_maneuver(
+                Selector.create("name", fellow.Name), selector,
+                json.dumps({"Comment": value}), save=False, download=False,
+            )
+        if operation == "profile":
+            return context.gateway.set_maneuver_behavior_profiles(
+                Selector.create("name", fellow.Name), selector,
+                '{"Velocity":{"Constant":{"Constant":30}}}', None,
+                save=False, download=False, segment_index=1,
+            )
+        return context.gateway.remove_scenario_maneuver(
+            Selector.create("name", fellow.Name), selector,
+            save=False, download=False, dry_run=True,
+        )
+
+    control = invoke(Selector.create("index", "0"), "control")
+    assert control.ok
+    result = invoke(Selector.create("name", sequence.Name), "named")
+
+    assert result.ok, result.to_dict()
+    if operation == "update":
+        assert sequence.Comment == "named"
+    elif operation == "remove_preview":
+        assert result.to_dict()["data"]["details"]["dryRun"] == "true"
+    assert fellow.Sequences.items == [sequence]
+    assert context.save_calls == []
+
+
+def test_fellow_named_profile_targets_second_sequence_and_segment_only() -> None:
+    context = _make_fellow_profile_context()
+    first_segment = _make_fellow_profile_context()
+    second_segment = _make_fellow_profile_context()
+    fellow = context.fellows.Add()
+    fellow.Name = "OwnedFellow"
+    first_sequence = fellow.Sequences.Add()
+    first_sequence.Name = "First"
+    second_sequence = SimpleNamespace(
+        Name="Second", Segments=_FakeComCollection([first_segment.sequence.Segments.Item(0), second_segment.sequence.Segments.Item(0)])
+    )
+    fellow.Sequences.items.append(second_sequence)
+
+    result = context.gateway.set_maneuver_behavior_profiles(
+        Selector.create("index", "0"), Selector.create("name", "Second"),
+        '{"Velocity":{"Constant":{"Constant":30}}}', None,
+        save=False, download=False, segment_index=1,
+    )
+
+    assert result.ok
+    assert context.velocity_value._constant == 25.0
+    assert first_segment.velocity_value._constant == 25.0
+    assert second_segment.velocity_value._constant == 30.0
+    assert context.save_calls == []
+
+
+@pytest.mark.parametrize("names", [("Other",), ("Target", "Target")])
+@pytest.mark.parametrize("operation", ("update", "profile", "remove_preview", "remove"))
+def test_fellow_maneuver_missing_or_ambiguous_name_fails_without_mutation(names: tuple[str, ...], operation: str) -> None:
+    context = _make_fellow_profile_context()
+    fellow = context.fellows.Add()
+    fellow.Name = "OwnedFellow"
+    fellow.Sequences.items = [SimpleNamespace(Name=name, Comment="initial") for name in names]
+    original = list(fellow.Sequences.items)
+    fellow_selector = Selector.create("name", "OwnedFellow")
+    maneuver_selector = Selector.create("name", "Target")
+
+    if operation == "update":
+        result = context.gateway.update_scenario_maneuver(fellow_selector, maneuver_selector, '{"Comment":"changed"}', False, False)
+    elif operation == "profile":
+        result = context.gateway.set_maneuver_behavior_profiles(
+            fellow_selector, maneuver_selector, '{"Velocity":{"Constant":{"Constant":30}}}', None, False, False
+        )
+    else:
+        result = context.gateway.remove_scenario_maneuver(fellow_selector, maneuver_selector, False, False, dry_run=operation == "remove_preview")
+
+    assert not result.ok
+    assert fellow.Sequences.items == original
+    assert all(sequence.Comment == "initial" for sequence in original)
+    assert context.save_calls == []
+
+
+def test_fellow_named_maneuver_removal_uses_numeric_position() -> None:
+    class NumericRemovalCollection(_FakeComCollection):
+        def Remove(self, selector: int) -> bool:
+            assert type(selector) is int
+            self.items.pop(selector)
+            return True
+
+    first = SimpleNamespace(Name="First")
+    target = SimpleNamespace(Name="Target")
+    sequences = NumericRemovalCollection([first, target])
+    fellow = SimpleNamespace(Name="OwnedFellow", Sequences=sequences)
+    experiment = SimpleNamespace(TrafficScenario=SimpleNamespace(Fellows=_FakeComCollection([fellow])))
+    gateway = _gateway_for_application(SimpleNamespace(ActiveProject=SimpleNamespace(ActiveExperiment=experiment)))
+
+    preview = gateway.remove_scenario_maneuver(
+        Selector.create("index", "0"), Selector.create("name", "Target"), False, False, dry_run=True
+    )
+    assert preview.ok
+    assert sequences.items == [first, target]
+    result = gateway.remove_scenario_maneuver(
+        Selector.create("index", "0"), Selector.create("name", "Target"), False, False
+    )
+
+    assert result.ok
+    assert sequences.items == [first]
 
 
 def _make_counted_ego_context() -> SimpleNamespace:
@@ -572,6 +741,356 @@ def _make_counted_ego_context() -> SimpleNamespace:
         application=application,
         sequence=sequence,
     )
+
+
+def test_fellow_profile_targets_second_segment_without_changing_first() -> None:
+    first = _make_fellow_profile_context()
+    second = _make_fellow_profile_context()
+    first.fellows.Add().Sequences.Add()
+    first.sequence.Segments.items.append(second.sequence.Segments.Item(0))
+
+    result = first.gateway.set_maneuver_behavior_profiles(
+        first.fellow_selector,
+        Selector.create("index", "0"),
+        '{"Velocity":{"Constant":{"Constant":20.0}}}',
+        "{}",
+        False,
+        False,
+        segment_index=1,
+    )
+
+    assert result.ok
+    assert first.velocity_value.Constant == 25.0
+    assert second.velocity_value.Constant == 20.0
+
+
+@pytest.mark.parametrize("profile_name,source_name,detail", [("Position", "YawAngleConstant", "longitudinalPosition"), ("Velocity", "Constant", "longitudinalVelocity")])
+@pytest.mark.parametrize("segment_index", [0, 1])
+def test_fellow_profiles_share_selected_segment(profile_name: str, source_name: str, detail: str, segment_index: int) -> None:
+    first = _make_fellow_profile_context()
+    second = _make_fellow_profile_context(first.events)
+    first.fellows.Add().Sequences.Add()
+    first.sequence.Segments.items.append(second.sequence.Segments.Item(0))
+    selected, untouched = (first, second) if segment_index == 0 else (second, first)
+
+    result = first.gateway.set_maneuver_behavior_profiles(
+        first.fellow_selector, Selector.create("index", "0"),
+        json.dumps({profile_name: {source_name: {"Constant": 70.0}}}),
+        '{"LaneSelection":{"Constant":{"Constant":-1.0}}}',
+        True, True, segment_index,
+    )
+
+    assert result.ok
+    details = result.to_dict()["data"]["details"]
+    assert details[detail] == "70.0"
+    assert details["lateralLaneSelection"] == "-1.0"
+    assert details["segmentIndex"] == str(segment_index)
+    assert details["updatedPropertyCount"] == "2"
+    assert selected.lateral_value._constant == -1.0
+    assert untouched.lateral_value._constant == 0.0
+    assert (selected.position_value if profile_name == "Position" else selected.velocity_value)._constant == 70.0
+    assert (untouched.position_value if profile_name == "Position" else untouched.velocity_value)._constant == (0.0 if profile_name == "Position" else 25.0)
+    assert first.sequence.Segments.item_calls == 1
+    assert selected.events.index(("lateral-type", "available")) < selected.events.index(("longitudinal", f"activate:{profile_name}"))
+    assert selected.events.index(("lateral", "read:Constant")) < first.events.index(("experiment", "Save"))
+    assert first.events.index(("experiment", "Save")) < first.events.index(("experiment", "Download"))
+
+
+def test_fellow_lateral_default_index_changes_only_first_segment() -> None:
+    first = _make_fellow_profile_context()
+    second = _make_fellow_profile_context()
+    first.fellows.Add().Sequences.Add()
+    first.sequence.Segments.items.append(second.sequence.Segments.Item(0))
+    result = first.gateway.set_maneuver_behavior_profiles(first.fellow_selector, Selector.create("index", "0"), None, '{"LaneSelection":{"Constant":{"Constant":-1.0}}}', False, False)
+    assert result.ok
+    assert first.lateral_value._constant == -1.0
+    assert second.lateral_value._constant == 0.0
+    assert result.to_dict()["data"]["details"]["segmentIndex"] == "0"
+
+
+def test_fellow_lateral_accepts_exactly_representable_integer() -> None:
+    context = _make_fellow_profile_context()
+    context.fellows.Add().Sequences.Add()
+    result = context.gateway.set_maneuver_behavior_profiles(context.fellow_selector, Selector.create("index", "0"), None, '{"LaneSelection":{"Constant":{"Constant":9007199254740992}}}', False, False)
+    assert result.ok
+    assert context.lateral_value._constant == 9007199254740992
+
+
+def test_native_mcp_profile_request_reaches_selected_fellow_and_rejects_lossy_integer() -> None:
+    from mcp.server.mcpserver import MCPServer
+    from modeldesk_mcp.tools import register_tools
+
+    first = _make_fellow_profile_context()
+    second = _make_fellow_profile_context()
+    first.fellows.Add().Sequences.Add()
+    first.sequence.Segments.items.append(second.sequence.Segments.Item(0))
+    server = MCPServer("profile-integration-test")
+    register_tools(server, _make_service(first.gateway))
+    args = {
+        "fellowSelectorKind": "index", "fellowSelectorValue": "0",
+        "maneuverSelectorKind": "index", "maneuverSelectorValue": "0",
+        "segmentIndex": 1,
+        "longitudinalProfileJson": {"Velocity": {"Constant": {"Constant": 20.0}}},
+        "lateralProfileJson": {"LaneSelection": {"Constant": {"Constant": -1.0}}},
+    }
+    result = asyncio.run(server.call_tool("modeldesk_set_maneuver_behavior_profiles", args))
+    assert result.structured_content["ok"]
+    assert result.structured_content["data"]["details"]["segmentIndex"] == "1"
+    assert first.lateral_value._constant == 0.0 and first.velocity_value._constant == 25.0
+    assert second.lateral_value._constant == -1.0 and second.velocity_value._constant == 20.0
+    first.events.clear()
+    second.events.clear()
+    args["lateralProfileJson"] = {"LaneSelection": {"Constant": {"Constant": 9007199254740993}}}
+    result = asyncio.run(server.call_tool("modeldesk_set_maneuver_behavior_profiles", args))
+    assert not result.structured_content["ok"]
+    assert result.structured_content["error"]["errorType"] == "validation"
+    assert first.events == [] and second.events == []
+
+
+@pytest.mark.parametrize("segment_index", [True, False, None, "1", 1.0, -1, 2147483648])
+def test_invalid_profile_segment_index_fails_before_com(segment_index: Any) -> None:
+    context = _make_counted_ego_context()
+    result = context.gateway.set_maneuver_behavior_profiles(Selector.active(), Selector.create("index", "0"), '{"StartPosition":70}', None, True, True, segment_index)
+    assert not result.ok
+    assert result.error is not None and result.error.error_type == "validation"
+    assert context.application.active_project_reads == 0
+
+
+def test_nonzero_ego_segment_index_fails_before_com() -> None:
+    context = _make_counted_ego_context()
+    result = context.gateway.set_maneuver_behavior_profiles(Selector.active(), Selector.create("index", "0"), '{"StartPosition":70}', None, False, False, 1)
+    assert not result.ok
+    assert context.application.active_project_reads == 0
+
+
+def test_explicit_zero_ego_segment_preserves_initial_value_behavior() -> None:
+    context = _make_counted_ego_context()
+    result = context.gateway.set_maneuver_behavior_profiles(Selector.active(), Selector.create("index", "0"), '{"StartPosition":70}', None, False, False, 0)
+    assert result.ok
+    assert context.sequence.StartPosition == 70
+
+
+@pytest.mark.parametrize("missing", ["out-of-range", "missing-collection", "missing-item", "inaccessible-item", "missing-activity"])
+def test_invalid_fellow_segment_fails_before_mutation(missing: str) -> None:
+    context = _make_fellow_profile_context()
+    context.fellows.Add().Sequences.Add()
+    if missing == "missing-collection":
+        context.sequence.Segments = None
+    elif missing == "missing-item":
+        context.sequence.Segments.items[0] = None
+    elif missing == "inaccessible-item":
+        def fail_item(index: int) -> None:
+            raise RuntimeError("item unavailable")
+        context.sequence.Segments.Item = fail_item
+    elif missing == "missing-activity":
+        context.sequence.Segments.items[0] = SimpleNamespace(Activity=None)
+    result = context.gateway.set_maneuver_behavior_profiles(context.fellow_selector, Selector.create("index", "0"), None, '{"LaneSelection":{"Constant":{"Constant":-1}}}', True, True, 1 if missing == "out-of-range" else 0)
+    assert not result.ok
+    assert context.events == []
+    assert context.save_calls == []
+
+
+@pytest.mark.parametrize("lateral_json", [
+    '{"Deviation":{"Constant":{"Constant":1}}}',
+    '{"laneselection":{"Constant":{"Constant":1}}}',
+    '{"LaneSelection":{"FinalLane":{"Constant":1}}}',
+    '{"LaneSelection":{"Constant":{}}}',
+    '{"LaneSelection":{"Constant":{"constant":1}}}',
+    '{"LaneSelection":{"Constant":{"Constant":1,"other":2}}}',
+    '{"LaneSelection":{"Constant":{"Constant":1}},"Deviation":{}}',
+    '{"LaneSelection":{"Constant":{"Constant":true}}}',
+    '{"LaneSelection":{"Constant":{"Constant":null}}}',
+    '{"LaneSelection":{"Constant":{"Constant":"1"}}}',
+    '{"LaneSelection":{"Constant":{"Constant":[]}}}',
+    '{"LaneSelection":{"Constant":{"Constant":{}}}}',
+    '{"LaneSelection":{"Constant":{"Constant":NaN}}}',
+    '{"LaneSelection":{"Constant":{"Constant":1e999}}}',
+    '{"LaneSelection":{"Constant":{"Constant":9007199254740993}}}',
+    '{"LaneSelection":{"Constant":{"Constant":1,"Constant":2}}}',
+    pytest.param(json.dumps({"LaneSelection": {"Constant": {"Constant": 10**400}}}), id="positive-com-double-overflow"),
+    pytest.param(json.dumps({"LaneSelection": {"Constant": {"Constant": -(10**400)}}}), id="negative-com-double-overflow"),
+    pytest.param(json.dumps({"LaneSelection": {"Constant": {"Constant": -9007199254740993}}}), id="negative-lossy-integer"),
+])
+def test_invalid_fellow_lateral_fails_before_any_com(lateral_json: str) -> None:
+    context = _make_fellow_profile_context()
+    result = context.gateway.set_maneuver_behavior_profiles(context.fellow_selector, Selector.create("index", "0"), '{"Velocity":{"Constant":{"Constant":20}}}', lateral_json, True, True)
+    assert not result.ok
+    assert result.error is not None and result.error.error_type == "validation"
+    assert context.fellows.item_calls == 0
+    assert context.events == []
+    assert context.save_calls == []
+
+
+@pytest.mark.parametrize("missing_manager", ["longitudinal", "lateral", "lateral-unavailable", "longitudinal-unavailable"])
+def test_both_fellow_managers_are_preflighted_before_mutation(missing_manager: str) -> None:
+    context = _make_fellow_profile_context()
+    context.fellows.Add().Sequences.Add()
+    if missing_manager == "longitudinal":
+        context.activity.LongitudinalType = None
+    elif missing_manager == "lateral":
+        context.activity.LateralType = None
+    elif missing_manager == "lateral-unavailable":
+        context.lateral_type.elements = {}
+    else:
+        context.longitudinal_profile.elements = {}
+    result = context.gateway.set_maneuver_behavior_profiles(context.fellow_selector, Selector.create("index", "0"), '{"Velocity":{"Constant":{"Constant":20}}}', '{"LaneSelection":{"Constant":{"Constant":-1}}}', True, True)
+    assert not result.ok
+    assert not any("activate:" in event for _, event in context.events)
+    assert context.save_calls == []
+
+
+@pytest.mark.parametrize("failure", ["profile-activation", "profile-false", "profile-active", "source-unavailable", "source-activation", "source-false", "source-active", "setter", "readback-error", "readback-mismatch"])
+def test_fellow_lateral_failure_reports_partial_and_never_persists(failure: str) -> None:
+    context = _make_fellow_profile_context()
+    context.fellows.Add().Sequences.Add()
+    def fail_activation(name: str) -> None:
+        raise RuntimeError("activation failed")
+    if failure == "profile-activation":
+        context.lateral_type.Activate = fail_activation
+    elif failure == "profile-false":
+        context.lateral_type.Activate = lambda name: False
+    elif failure == "profile-active":
+        context.lateral_type.elements["LaneSelection"] = None
+    elif failure == "source-unavailable":
+        context.lateral_source.elements = {}
+    elif failure == "source-activation":
+        context.lateral_source.Activate = fail_activation
+    elif failure == "source-false":
+        context.lateral_source.Activate = lambda name: False
+    elif failure == "source-active":
+        context.lateral_source.elements["Constant"] = None
+    elif failure == "setter":
+        context.lateral_value.setter_error = RuntimeError("setter failed")
+    elif failure == "readback-error":
+        context.lateral_value.readback_error = RuntimeError("readback failed")
+    else:
+        context.lateral_value.readback_override = 4.0
+    result = context.gateway.set_maneuver_behavior_profiles(context.fellow_selector, Selector.create("index", "0"), None, '{"LaneSelection":{"Constant":{"Constant":-1}}}', True, True)
+    assert not result.ok
+    assert result.error is not None and "partial" in result.error.message and "not rolled back" in result.error.message
+    assert context.save_calls == []
+    assert len([event for _, event in context.events if event == "set:Constant"]) <= 1
+
+
+@pytest.mark.parametrize("failure", ["save", "download"])
+def test_fellow_lateral_persistence_failures_follow_verified_readback(failure: str) -> None:
+    context = _make_fellow_profile_context()
+    context.fellows.Add().Sequences.Add()
+    experiment = context.gateway._application.ActiveProject.ActiveExperiment
+    def fail() -> None:
+        context.events.append(("experiment", failure))
+        raise RuntimeError(f"{failure} failed")
+    setattr(experiment, failure.capitalize(), fail)
+    result = context.gateway.set_maneuver_behavior_profiles(context.fellow_selector, Selector.create("index", "0"), None, '{"LaneSelection":{"Constant":{"Constant":-1}}}', True, True)
+    assert not result.ok
+    assert result.error is not None
+    assert context.events.index(("lateral", "read:Constant")) < context.events.index(("experiment", failure))
+    if failure == "save":
+        assert context.save_calls == []
+        assert "Save failed" in result.error.message
+    else:
+        assert context.save_calls == ["save"]
+        assert "Save succeeded" in result.error.message
+
+
+@pytest.mark.parametrize("failure", ["Save", "Download"])
+def test_fellow_lateral_false_persistence_result_is_not_success(failure: str) -> None:
+    context = _make_fellow_profile_context()
+    context.fellows.Add().Sequences.Add()
+
+    def return_false() -> bool:
+        context.save_calls.append(failure.lower())
+        context.events.append(("experiment", failure))
+        return False
+
+    setattr(context.gateway._application.ActiveProject.ActiveExperiment, failure, return_false)
+    result = context.gateway.set_maneuver_behavior_profiles(
+        context.fellow_selector, Selector.create("index", "0"), None,
+        '{"LaneSelection":{"Constant":{"Constant":-1}}}', True, True,
+    )
+
+    assert not result.ok
+    assert result.error is not None and f"{failure} failed" in result.error.message
+    assert context.events.index(("lateral", "read:Constant")) < context.events.index(("experiment", failure))
+    assert context.save_calls == (["save"] if failure == "Save" else ["save", "download"])
+    assert ("Save succeeded" in result.error.message) is (failure == "Download")
+
+
+@pytest.mark.parametrize("activation_return", [None, True])
+def test_fellow_lateral_noop_activation_does_not_report_wrong_profile_as_verified(activation_return: Any) -> None:
+    context = _make_fellow_profile_context()
+    context.fellows.Add().Sequences.Add()
+    wrong_value = _FakeProfileValue("deviation", 3.0, context.events)
+    wrong_source = _FakeProfileSelection("deviation-source", {"Constant": wrong_value}, "Constant", context.events)
+    context.lateral_type.elements["Deviation"] = SimpleNamespace(
+        Name="Deviation", SourceType=wrong_source, _oleobj_=_fake_profile_ole_object("IMALateralDeviation")
+    )
+    context.lateral_type.elements["LaneSelection"].Name = "LaneSelection"
+    context.lateral_type.active_name = "Deviation"
+    context.lateral_type.Activate = lambda name: activation_return
+
+    result = context.gateway.set_maneuver_behavior_profiles(
+        context.fellow_selector, Selector.create("index", "0"), None,
+        '{"LaneSelection":{"Constant":{"Constant":-1}}}', True, True,
+    )
+
+    assert not result.ok, result.to_dict()
+    assert result.error is not None and "partial" in result.error.message
+    assert context.save_calls == []
+    assert wrong_value._constant == 3.0
+    assert context.lateral_value._constant == 0.0
+
+
+@pytest.mark.parametrize("identity", ["wrong", "unavailable"])
+@pytest.mark.parametrize("stage", ["lateral-profile", "lateral-source", "position-profile", "position-source", "velocity-profile", "velocity-source"])
+def test_fellow_profile_rejects_unverified_active_interface_before_assignment(stage: str, identity: str) -> None:
+    context = _make_fellow_profile_context()
+    context.fellows.Add().Sequences.Add()
+    if stage.startswith("lateral"):
+        target = context.lateral_type.elements["LaneSelection"] if stage.endswith("profile") else context.lateral_value
+        longitudinal_json = None
+        lateral_json = '{"LaneSelection":{"Constant":{"Constant":-1}}}'
+        wrong_interface = "IMALateralDeviation" if stage.endswith("profile") else "IMAFinalLane"
+    else:
+        profile_name = "Position" if stage.startswith("position") else "Velocity"
+        source_name = "YawAngleConstant" if profile_name == "Position" else "Constant"
+        target = context.longitudinal_profile.elements[profile_name] if stage.endswith("profile") else (
+            context.position_value if profile_name == "Position" else context.velocity_value
+        )
+        longitudinal_json = json.dumps({profile_name: {source_name: {"Constant": 70}}})
+        lateral_json = None
+        wrong_interface = "IMALateralDeviation" if stage.endswith("profile") else "IMAFinalLane"
+    target._oleobj_ = _fake_profile_ole_object(wrong_interface) if identity == "wrong" else object()
+
+    result = context.gateway.set_maneuver_behavior_profiles(
+        context.fellow_selector, Selector.create("index", "0"), longitudinal_json, lateral_json, True, True,
+    )
+
+    assert not result.ok
+    assert result.error is not None and "partial" in result.error.message and "identity" in result.error.message
+    assert not any(event == "set:Constant" for _, event in context.events)
+    assert context.save_calls == []
+
+
+@pytest.mark.parametrize("activation_return", [None, True])
+def test_fellow_lateral_noop_source_activation_rejects_wrong_interface(activation_return: Any) -> None:
+    context = _make_fellow_profile_context()
+    context.fellows.Add().Sequences.Add()
+    wrong_source = _FakeProfileValue("wrong-source", 3.0, context.events)
+    wrong_source._oleobj_ = _fake_profile_ole_object("IMAFinalLane")
+    context.lateral_source.elements["FinalLane"] = wrong_source
+    context.lateral_source.active_name = "FinalLane"
+    context.lateral_source.Activate = lambda name: activation_return
+
+    result = context.gateway.set_maneuver_behavior_profiles(
+        context.fellow_selector, Selector.create("index", "0"), None,
+        '{"LaneSelection":{"Constant":{"Constant":-1}}}', True, True,
+    )
+
+    assert not result.ok
+    assert result.error is not None and "partial" in result.error.message
+    assert wrong_source._constant == 3.0 and context.lateral_value._constant == 0.0
+    assert context.save_calls == []
 
 
 def test_get_capabilities_does_not_resolve_lazy_testing_domain() -> None:
@@ -710,6 +1229,200 @@ def test_ego_profile_rejects_empty_or_ambiguous_maneuver_sequences(
     )
 
 
+@pytest.mark.parametrize("fellow_kind,fellow_value", (("index", "0"), ("name", "Truck1")))
+@pytest.mark.parametrize("order,expected_match", (((0, 1), "true"), ((1, 0), "false")))
+def test_fellow_sequence_order_without_index_matches_collection_order(
+    fellow_kind: str, fellow_value: str, order: tuple[int, int], expected_match: str
+) -> None:
+    sequences = _FakeComCollection([
+        SimpleNamespace(Name="Sequence1", Segments=_FakeComCollection()),
+        SimpleNamespace(Name="Sequence2", Segments=_FakeComCollection()),
+    ])
+    fellows = _FakeComCollection([SimpleNamespace(Name="Truck1", Sequences=sequences)])
+    persistence_calls: list[str] = []
+    application = SimpleNamespace(
+        ActiveProject=SimpleNamespace(
+            Save=lambda: persistence_calls.append("save"),
+            ActiveExperiment=SimpleNamespace(
+                TrafficScenario=SimpleNamespace(Fellows=fellows),
+                Download=lambda: persistence_calls.append("download"),
+            ),
+        )
+    )
+    result = _gateway_for_application(application).verify_scenario_maneuver_sequence(
+        Selector.create(fellow_kind, fellow_value),
+        json.dumps([{"selectorKind": "index", "selectorValue": str(index)} for index in order]),
+    )
+
+    assert result.ok, result.to_dict()
+    details = result.to_dict()["data"]["details"]
+    assert details["currentIndices"] == "[0,1]"
+    assert details["requestedIndices"] == json.dumps(list(order), separators=(",", ":"))
+    assert details["matchesCurrentOrder"] == expected_match
+    assert [sequence.Name for sequence in sequences.items] == ["Sequence1", "Sequence2"]
+    assert persistence_calls == []
+
+
+def _fellow_order_context(names: list[str]) -> tuple[ModelDeskAutomationGateway, list[str], list[str]]:
+    events: list[str] = []
+
+    class SequenceCollection:
+        @property
+        def Count(self) -> int:
+            return len(names)
+
+        def Item(self, selector: int | str) -> Any:
+            if isinstance(selector, str):
+                if selector not in names:
+                    raise RuntimeError("Unknown sequence")
+                name = selector
+            elif 0 <= selector < len(names):
+                name = names[selector]
+            else:
+                raise RuntimeError("Sequence index out of range")
+            return SimpleNamespace(Name=name, Segments=_FakeComCollection())
+
+        def Remove(self, selector: Any) -> None:
+            events.append("remove")
+
+        def Add(self) -> None:
+            events.append("add")
+
+    fellows = _FakeComCollection([SimpleNamespace(Name="Truck1", Sequences=SequenceCollection())])
+    application = SimpleNamespace(
+        ActiveProject=SimpleNamespace(
+            Save=lambda: events.append("save"),
+            ActiveExperiment=SimpleNamespace(
+                TrafficScenario=SimpleNamespace(Fellows=fellows),
+                Download=lambda: events.append("download"),
+            ),
+        )
+    )
+    return _gateway_for_application(application), names, events
+
+
+@pytest.mark.parametrize(
+    ("selectors", "expected_indices", "expected_match"),
+    (
+        ([('name', 'Sequence1'), ('name', 'Sequence2')], [0, 1], "true"),
+        ([('name', 'Sequence2'), ('name', 'Sequence1')], [1, 0], "false"),
+        ([('index', '0'), ('name', 'Sequence2')], [0, 1], "true"),
+        ([('name', 'Sequence1')], [0], "false"),
+        ([('index', '0'), ('name', 'Sequence1')], [0, 0], "false"),
+        ([('index', '0'), ('index', '1'), ('index', '1')], [0, 1, 1], "false"),
+    ),
+)
+def test_fellow_sequence_order_resolves_selectors_to_positions(
+    selectors: list[tuple[str, str]], expected_indices: list[int], expected_match: str
+) -> None:
+    gateway, names, events = _fellow_order_context(["Sequence1", "Sequence2"])
+    result = gateway.verify_scenario_maneuver_sequence(
+        Selector.create("name", "Truck1"),
+        json.dumps([{"selectorKind": kind, "selectorValue": value} for kind, value in selectors]),
+    )
+
+    assert result.ok, result.to_dict()
+    assert result.to_dict()["data"]["details"] == {
+        "fellowSelectorKind": "Name",
+        "fellowSelectorValue": "Truck1",
+        "currentIndices": "[0,1]",
+        "requestedIndices": json.dumps(expected_indices, separators=(",", ":")),
+        "matchesCurrentOrder": expected_match,
+    }
+    assert names == ["Sequence1", "Sequence2"]
+    assert events == []
+
+
+@pytest.mark.parametrize(
+    ("names", "fellow_kind", "fellow_value", "selector_json"),
+    (
+        (["Sequence1", "Sequence2"], "name", "Truck1", "[]"),
+        ([], "index", "0", '[{"selectorKind":"index","selectorValue":"0"}]'),
+        (["Sequence1"], "name", "Missing", '[{"selectorKind":"index","selectorValue":"0"}]'),
+        (["Sequence1"], "index", "0", '[{"selectorKind":"name","selectorValue":"Missing"}]'),
+        (["Sequence1"], "index", "0", '[{"selectorKind":"index","selectorValue":"1"}]'),
+        (["Sequence1"], "index", "0", '[{"selectorKind":"index","selectorValue":"-1"}]'),
+        (["Sequence1"], "index", "0", '[{"selectorKind":"active","selectorValue":""}]'),
+        (["Sequence1"], "index", "0", '[{"selectorKind":"name","selectorValue":""}]'),
+        (["Sequence1"], "index", "0", '[{"selectorKind":"invalid","selectorValue":"0"}]'),
+        (["Sequence1", "Sequence1"], "index", "0", '[{"selectorKind":"name","selectorValue":"Sequence1"}]'),
+    ),
+)
+def test_fellow_sequence_order_rejects_unresolvable_selectors(
+    names: list[str], fellow_kind: str, fellow_value: str, selector_json: str
+) -> None:
+    original_names = list(names)
+    gateway, names, events = _fellow_order_context(names)
+    result = gateway.verify_scenario_maneuver_sequence(Selector.create(fellow_kind, fellow_value), selector_json)
+
+    assert not result.ok
+    assert result.error is not None
+    assert names == original_names
+    assert events == []
+
+
+@pytest.mark.parametrize(
+    ("selectors", "expected_indices", "expected_match"),
+    (
+        ([("name", "Sequence1"), ("name", "Sequence2")], [0, 1], "true"),
+        ([("name", "Sequence2"), ("name", "Sequence1")], [1, 0], "false"),
+        ([("index", "0"), ("name", "Sequence2")], [0, 1], "true"),
+        ([("name", "Sequence2"), ("index", "0")], [1, 0], "false"),
+    ),
+)
+def test_fellow_sequence_order_resolves_names_when_com_item_requires_position(
+    selectors: list[tuple[str, str]], expected_indices: list[int], expected_match: str
+) -> None:
+    gateway, names, events = _fellow_order_context(["Sequence1", "Sequence2"])
+    sequences = gateway._application.ActiveProject.ActiveExperiment.TrafficScenario.Fellows.items[0].Sequences
+    original_item = sequences.Item
+
+    def position_only_item(selector: int | str) -> Any:
+        if isinstance(selector, str):
+            raise RuntimeError("Sequences.Item rejects sequence names on ModelDesk 26.2.")
+        return original_item(selector)
+
+    sequences.Item = position_only_item
+    result = gateway.verify_scenario_maneuver_sequence(
+        Selector.create("name", "Truck1"),
+        json.dumps([{"selectorKind": kind, "selectorValue": value} for kind, value in selectors]),
+    )
+
+    assert result.ok, result.to_dict()
+    details = result.to_dict()["data"]["details"]
+    assert details["currentIndices"] == "[0,1]"
+    assert details["requestedIndices"] == json.dumps(expected_indices, separators=(",", ":"))
+    assert details["matchesCurrentOrder"] == expected_match
+    assert names == ["Sequence1", "Sequence2"]
+    assert events == []
+
+
+@pytest.mark.parametrize(
+    ("order", "expected_indices", "expected_match"),
+    (((0, 1), "[7,42]", "true"), ((1, 0), "[42,7]", "false")),
+)
+def test_ego_sequence_order_preserves_noncontiguous_vendor_indices(
+    order: tuple[int, int], expected_indices: str, expected_match: str
+) -> None:
+    maneuvers = _FakeComCollection([SimpleNamespace(Index=7), SimpleNamespace(Index=42)])
+    application = SimpleNamespace(
+        ActiveProject=SimpleNamespace(
+            ActiveExperiment=SimpleNamespace(TrafficScenario=SimpleNamespace(Maneuver=maneuvers))
+        )
+    )
+    result = _gateway_for_application(application).verify_scenario_maneuver_sequence(
+        Selector.active(),
+        json.dumps([{"selectorKind": "index", "selectorValue": str(index)} for index in order]),
+    )
+
+    assert result.ok, result.to_dict()
+    details = result.to_dict()["data"]["details"]
+    assert details["currentIndices"] == "[7,42]"
+    assert details["requestedIndices"] == expected_indices
+    assert details["matchesCurrentOrder"] == expected_match
+    assert [maneuver.Index for maneuver in maneuvers.items] == [7, 42]
+
+
 def test_scenario_maneuver_sequence_verification_does_not_reorder_or_persist() -> None:
     class FakeManeuver:
         __slots__ = ("_index",)
@@ -801,7 +1514,7 @@ def test_scenario_maneuver_order_never_writes_immutable_index(
     assert [maneuvers.Item(index).Index for index in range(maneuvers.Count)] == [0, 1]
 
 
-def test_lateral_profile_probe_uses_source_defined_activity_manager() -> None:
+def test_unsupported_fellow_lateral_profile_is_rejected_before_activity_access() -> None:
     class FakeSequence:
         __slots__ = ("Segments",)
 

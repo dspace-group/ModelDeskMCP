@@ -20,7 +20,7 @@ For automation calls, install and register ModelDesk locally and make the intend
 
 ## VS Code
 
-Add the server entry to [.vscode/mcp.json](../.vscode/mcp.json), preserving any other configured servers:
+Create your own local `.vscode/mcp.json` file and add this server entry. Keep any other server entries. Do not publish personal MCP configuration or credentials.
 
 ```json
 {
@@ -102,11 +102,11 @@ Collection snapshots can be truncated. Inspect their message and count rather th
 
 ## Package Sources and CI
 
-uv records registry and artifact URLs in the lockfile. A file resolved against an organization-local mirror can therefore reference hosts that are unavailable on another machine. A DNS/download error for such a host is a package-source problem, not a ModelDesk COM error.
+The lockfile records package versions, public PyPI registry URLs, and public download metadata. Dependency installation requires access to `pypi.org` and `files.pythonhosted.org`. A DNS or download failure is a package-source problem, not a ModelDesk COM error.
 
-Use a package index approved and reachable in the target environment. If an explicit override is appropriate, set `UV_DEFAULT_INDEX` in that environment before invoking uv. An index change can re-resolve and update the local lockfile; review that diff rather than silently discarding it. Do not commit credentials, disable certificate validation, or change organization-wide package policy to work around a checkout-specific issue.
+If you need a different package index, set `UV_DEFAULT_INDEX` for the uv process. An index change can update the local lockfile. Review the changes before you commit them. Do not commit credentials or disable certificate validation.
 
-The [../.github/workflows/python-tests.yml](../.github/workflows/python-tests.yml) test job sets `UV_DEFAULT_INDEX=https://pypi.org/simple` for all its uv calls, including launcher checks. This lets hosted GitHub runners resolve public package sources without changing a developer's local configuration.
+The [../.github/workflows/python-tests.yml](../.github/workflows/python-tests.yml) test job sets `UV_DEFAULT_INDEX=https://pypi.org/simple` for its uv calls. This setting does not change local package configuration.
 
 ## Safe First Calls
 
