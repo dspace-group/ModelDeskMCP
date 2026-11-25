@@ -133,6 +133,23 @@ def _gateway_with_active_road(road) -> ModelDeskAutomationGateway:
     return gateway
 
 
+def test_road_object_live_preview_reports_position_diff_and_conflict(monkeypatch) -> None:
+    client = pytest.importorskip("win32com.client")
+    road_object = SimpleNamespace(Name="Cone", Position=SimpleNamespace(S=10.0, D=1.0))
+    road = SimpleNamespace(Name="Road", Length=50.0, Objects=_FakeRoadObjects([road_object]))
+    gateway = _gateway_with_active_road(road)
+    monkeypatch.setattr(client, "GetActiveObject", lambda _prog_id: gateway._application)
+    monkeypatch.setattr(client, "Dispatch", lambda *_args: pytest.fail("Preview must never start COM."))
+    target = {"roadSelectorKind": "index", "roadSelectorValue": "0", "objectIndex": 0}
+
+    diff = gateway.inspect_preview("modeldesk_update_road_object", {**target, "propertiesJson": {"s": 20.0}})
+    assert diff["targetVerified"]
+    assert diff["changes"] == [{"field": "s", "before": 10.0, "after": 20.0}]
+    invalid = gateway.inspect_preview("modeldesk_update_road_object", {**target, "propertiesJson": {"s": 60.0}})
+    assert not invalid["targetVerified"] and invalid["conflicts"]
+    assert road_object.Position.S == 10.0
+
+
 def test_add_straight_segment_request_accepts_length() -> None:
     request = RoadSegmentEditRequest.create("Straight", '{"length": 100}', -1, False, False, True)
 

@@ -5,7 +5,32 @@ from __future__ import annotations
 from dataclasses import dataclass, fields, is_dataclass
 from enum import Enum
 import re
-from typing import Any
+from typing import Any, Literal, NotRequired, TypedDict
+
+
+type PreviewScalar = str | int | float | bool | None
+
+
+class PreviewChange(TypedDict):
+    field: str
+    before: PreviewScalar
+    after: PreviewScalar
+
+
+class PreviewPropertyScope(TypedDict):
+    field: Literal["propertiesJson", "lateralProfileJson"]
+    source: Literal["target", "sample"]
+    names: list[str]
+    truncated: bool
+
+
+class PreviewInspection(TypedDict):
+    targetVerified: bool
+    observed: dict[str, PreviewScalar]
+    changes: list[PreviewChange]
+    conflicts: list[str]
+    unverified: list[str]
+    writableProperties: NotRequired[PreviewPropertyScope]
 
 
 @dataclass(frozen=True, slots=True)

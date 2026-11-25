@@ -96,6 +96,31 @@ def test_close_project_dry_run_does_not_close_project() -> None:
     assert not project.closed
 
 
+def test_live_project_preview_reads_current_project_without_starting_or_saving(monkeypatch, tmp_path) -> None:
+    client = pytest.importorskip("win32com.client")
+    candidate = tmp_path / "Next.prj"
+    candidate.touch()
+    project = SimpleNamespace(Name="Current", ActiveExperiment=SimpleNamespace(Name="Baseline"))
+    application = SimpleNamespace(ActiveProject=project)
+    gateway = ModelDeskAutomationGateway(_InlineDispatcher(), ComGatewayOptions())
+    monkeypatch.setattr(client, "GetActiveObject", lambda _prog_id: application)
+    monkeypatch.setattr(client, "Dispatch", lambda *_args: pytest.fail("Preview must never start COM."))
+
+    preview = gateway.inspect_preview("modeldesk_open_project", {"projectFile": str(candidate)})
+    assert preview["targetVerified"]
+    assert preview["observed"] == {"activeProject": "Current", "activeExperiment": "Baseline"}
+    assert preview["changes"] == [{"field": "activeProject", "before": "Current", "after": str(candidate)}]
+    assert preview["conflicts"] == []
+    assert any("unsaved" in note for note in preview["unverified"])
+
+    def no_active_instance(_prog_id):
+        raise RuntimeError("Not running.")
+
+    monkeypatch.setattr(client, "GetActiveObject", no_active_instance)
+    unavailable = gateway.inspect_preview("modeldesk_save_project", {})
+    assert not unavailable["targetVerified"] and unavailable["unverified"]
+
+
 def test_gateway_reacquires_active_project_on_each_operation() -> None:
     class MutableApplication:
         Version = "fake"

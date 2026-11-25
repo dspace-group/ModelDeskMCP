@@ -13,6 +13,7 @@ from modeldesk_mcp.contracts import ModelDeskStatus, ParameterValueInfo, ToolRes
 from modeldesk_mcp.tools import EXPECTED_TOOL_NAMES, TOOL_DOMAIN_BY_NAME, TOOL_DOMAINS, register_tools
 from modeldesk_mcp.tools.registry import (
     _ADDITIVE_TOOL_NAMES,
+    _COM_READ_TOOL_NAMES,
     _IDEMPOTENT_TOOL_NAMES,
     _NON_DESTRUCTIVE_CONTEXT_TOOL_NAMES,
     _OPEN_WORLD_TOOL_NAMES,
@@ -99,6 +100,124 @@ def test_register_tools_registers_exact_expected_names() -> None:
     assert tuple(fake_mcp.annotations.keys()) == EXPECTED_TOOL_NAMES
 
 
+@pytest.mark.parametrize(("code", "retryable"), [("timeout", True), ("timeout_outcome_unknown", False)])
+def test_timeout_errors_reach_mcp_client(code: str, retryable: bool) -> None:
+    from mcp import ClientSession
+    from mcp.client._memory import InMemoryTransport
+    from modeldesk_mcp.contracts import ToolError
+    from modeldesk_mcp.server import ModelDeskMcpServer
+
+    name = "modeldesk_get_status"
+
+    class TimeoutService(FakeService):
+        def get_status(self) -> ToolResult:
+            return ToolResult.failure(name, "fixture", ToolError(code, "Timed out.", name, "Verify the target.", retryable))
+
+    async def verify() -> None:
+        app = ModelDeskMcpServer()
+        register_tools(app, TimeoutService())
+        async with InMemoryTransport(app) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as client:
+                await client.initialize()
+                result = await client.call_tool(name)
+        assert result.is_error
+        assert result.structured_content["error"] == {
+            "errorType": code, "message": "Timed out.", "operation": name,
+            "recovery": "Verify the target.", "isRetryable": retryable,
+        }
+
+    asyncio.run(verify())
+
+
+def test_high_impact_previews_are_com_free_and_have_valid_output() -> None:
+    from jsonschema import Draft202012Validator
+    from modeldesk_mcp.server import ModelDeskMcpServer
+    from modeldesk_mcp.tools.preview import PREVIEW_EFFECTS
+
+    async def verify() -> None:
+        app = ModelDeskMcpServer()
+        register_tools(app, FakeService())
+        tools = {tool.name: tool for tool in await app.list_tools()}
+        assert len(PREVIEW_EFFECTS) == 29
+        for name in PREVIEW_EFFECTS:
+            tool = tools[name]
+            properties = tool.input_schema["properties"]
+            arguments = {field: properties[field]["examples"][0] for field in tool.input_schema.get("required", ())}
+            result = await app.call_tool(name, {**arguments, "dryRun": True})
+            assert not result.is_error, name
+            Draft202012Validator(tool.output_schema).validate(result.structured_content)
+            preview = result.structured_content["data"]
+            assert preview["dryRun"] and not preview["targetVerified"]
+            assert preview["effects"] and preview["preconditions"]
+            if name in {"modeldesk_open_project", "modeldesk_start_maneuver"}:
+                assert len(preview["effects"]) == 2
+
+    asyncio.run(verify())
+
+
+def test_schema_variants_follow_kind_and_target() -> None:
+    from jsonschema import Draft202012Validator
+    from modeldesk_mcp.server import ModelDeskMcpServer
+
+    app = ModelDeskMcpServer()
+    register_tools(app, FakeService())
+    schemas = {tool.name: Draft202012Validator(tool.input_schema) for tool in asyncio.run(app.list_tools())}
+    blank = asyncio.run(app.call_tool("modeldesk_get_workflow_plan", {"workflowName": " "}))
+    assert blank.is_error and "workflowName" in blank.structured_content["error"]["message"]
+    parameter = schemas["modeldesk_set_parameter_value"]
+    base = {"parameterPath": "Vehicle.Speed"}
+    assert parameter.is_valid({**base, "valueKind": "Vector", "valueJson": [1, 2.5]})
+    assert parameter.is_valid({**base, "valueKind": "Matrix", "valueJson": [[1, 2]]})
+    assert parameter.is_valid({**base, "valueKind": "Table", "valueJson": {"rows": [[1]], "columns": ["Speed"]}})
+    assert not parameter.is_valid({**base, "valueKind": "Text", "valueJson": [1]})
+    assert not parameter.is_valid({**base, "valueKind": "Vector", "valueJson": [True]})
+
+    profile = schemas["modeldesk_set_maneuver_behavior_profiles"]
+    maneuver = {"maneuverSelectorKind": "index", "maneuverSelectorValue": "0"}
+    ego = {"StartPosition": 70}
+    fellow = {"fellowSelectorKind": "name", "fellowSelectorValue": "Truck"}
+    position = {"Position": {"YawAngleConstant": {"Constant": 70}}}
+    assert profile.is_valid({**maneuver, "longitudinalProfileJson": ego})
+    assert profile.is_valid({**maneuver, **fellow, "longitudinalProfileJson": position})
+    assert not profile.is_valid({**maneuver, **fellow, "longitudinalProfileJson": ego})
+    assert not profile.is_valid({**maneuver, "longitudinalProfileJson": position})
+    patch = schemas["modeldesk_update_road_object"]
+    road_object = {"roadSelectorKind": "name", "roadSelectorValue": "Road", "objectIndex": 0}
+    assert patch.is_valid({**road_object, "propertiesJson": {"laneMapping": [1]}})
+    assert not patch.is_valid({**road_object, "propertiesJson": {"unsupported": []}})
+
+
+def test_live_preview_requires_dry_run_and_returns_a_schema_valid_diff() -> None:
+    from jsonschema import Draft202012Validator
+    from modeldesk_mcp.server import ModelDeskMcpServer
+
+    calls = []
+
+    def inspect(name, arguments):
+        calls.append((name, arguments))
+        return {
+            "targetVerified": True, "observed": {"activeProject": "Current"},
+            "changes": [{"field": "activeProject", "before": "Current", "after": "Next.prj"}],
+            "conflicts": [], "unverified": ["Unsaved state is unavailable."],
+        }
+
+    async def verify() -> None:
+        app = ModelDeskMcpServer(inspect)
+        register_tools(app, FakeService())
+        name = "modeldesk_open_project"
+        arguments = {"projectFile": "Next.prj", "inspectLive": True}
+        invalid = await app.call_tool(name, arguments)
+        assert invalid.is_error and not calls
+        preview = await app.call_tool(name, {**arguments, "dryRun": True})
+        assert not preview.is_error
+        schema = next(tool.output_schema for tool in await app.list_tools() if tool.name == name)
+        Draft202012Validator(schema).validate(preview.structured_content)
+        assert preview.structured_content["data"]["inspection"]["changes"][0]["before"] == "Current"
+        assert calls == [(name, {"projectFile": "Next.prj"})]
+
+    asyncio.run(verify())
+
+
 def test_real_mcp_schemas_document_inputs_and_share_tool_result_envelope() -> None:
     from mcp.server.mcpserver import MCPServer
 
@@ -139,13 +258,14 @@ def test_real_mcp_schemas_document_inputs_and_share_tool_result_envelope() -> No
     assert "registered workflow name" in workflow_description.lower()
     assert "com_error" not in workflow_description
     processing_description = tools_by_name["modeldesk_run_processing"].description
-    assert "not canceled on timeout" in processing_description.lower()
+    assert "queued work is canceled" in processing_description.lower()
+    assert "timeout_outcome_unknown" in processing_description
 
     open_project = next(tool for tool in tools if tool.name == "modeldesk_open_project")
     assert open_project.input_schema["properties"]["projectFile"]["examples"]
     set_parameter_value = next(tool for tool in tools if tool.name == "modeldesk_set_parameter_value")
     assert "$ref" in set_parameter_value.input_schema["properties"]["valueJson"]
-    assert "JsonValue" in set_parameter_value.input_schema["$defs"]
+    assert "ParameterInputValue" in set_parameter_value.input_schema["$defs"]
     basic_road = next(tool for tool in tools if tool.name == "modeldesk_create_basic_road")
     traffic_objects_schema = basic_road.input_schema["properties"]["trafficObjectsJson"]
     assert traffic_objects_schema["type"] == "array"
@@ -284,8 +404,10 @@ def test_real_mcp_schemas_document_inputs_and_share_tool_result_envelope() -> No
             else None
         )
         assert annotations.idempotent_hint is (
-            True if tool.name in _READ_ONLY_TOOL_NAMES | _IDEMPOTENT_TOOL_NAMES else None
+            True if tool.name in _READ_ONLY_TOOL_NAMES | _COM_READ_TOOL_NAMES | _IDEMPOTENT_TOOL_NAMES else None
         )
+        if tool.name in _COM_READ_TOOL_NAMES:
+            assert "can start ModelDesk" in tool.description
         if tool.name in _REPLAY_RISK_NOTES:
             assert "Replay risk:" in (tool.description or "")
         if tool.name in replay_risk_tool_names:

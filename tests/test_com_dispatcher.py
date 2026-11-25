@@ -1,12 +1,86 @@
 from __future__ import annotations
 
-from concurrent.futures import Future, TimeoutError
+from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError
+from contextvars import ContextVar
 import queue
 import threading
 from types import SimpleNamespace
 
+import anyio
+import pytest
+
 import modeldesk_mcp.com_bridge.dispatcher as dispatcher_module
 from modeldesk_mcp.com_bridge.dispatcher import ComStaDispatcher, ComWorkItem
+
+
+def test_timeouts_distinguish_queued_from_running_operations(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(dispatcher_module, "_try_import_pythoncom", lambda: None)
+    dispatcher = ComStaDispatcher()
+    started, release, forbidden = threading.Event(), threading.Event(), threading.Event()
+
+    def running_operation() -> None:
+        started.set()
+        assert release.wait(5)
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as callers:
+            running = callers.submit(dispatcher.invoke, running_operation, 0.5)
+            assert started.wait(2)
+            with pytest.raises(dispatcher_module.ComOperationTimeout) as queued:
+                dispatcher.invoke(forbidden.set, 0.01)
+            assert queued.value.cancelled_before_start
+            with pytest.raises(dispatcher_module.ComOperationTimeout) as started_timeout:
+                running.result(timeout=2)
+            assert not started_timeout.value.cancelled_before_start
+            release.set()
+            marker = ContextVar("marker", default="unset")
+            marker.set("caller-context")
+            assert dispatcher.invoke(marker.get, 2) == "caller-context"
+            assert not forbidden.is_set()
+    finally:
+        release.set()
+        dispatcher.dispose()
+
+
+def test_client_cancellation_prevents_queued_com_work(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(dispatcher_module, "_try_import_pythoncom", lambda: None)
+    dispatcher = ComStaDispatcher()
+    started, release, forbidden = threading.Event(), threading.Event(), threading.Event()
+
+    def running_operation() -> None:
+        started.set()
+        assert release.wait(5)
+
+    async def cancel_queued() -> None:
+        entered = anyio.Event()
+        original_put = dispatcher._work_items.put
+
+        def observe_put(item, **options) -> None:
+            original_put(item, **options)
+            anyio.from_thread.run_sync(entered.set)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(dispatcher._work_items, "put", observe_put)
+            with anyio.fail_after(2):
+                async with anyio.create_task_group() as tasks:
+                    tasks.start_soon(anyio.to_thread.run_sync, dispatcher.invoke, forbidden.set, 5)
+                    await entered.wait()
+                    tasks.cancel_scope.cancel()
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as callers:
+            running = callers.submit(dispatcher.invoke, running_operation, 5)
+            try:
+                assert started.wait(2)
+                anyio.run(cancel_queued)
+            finally:
+                release.set()
+            running.result(timeout=2)
+        assert dispatcher.invoke(lambda: "settled", 2) == "settled"
+        assert not forbidden.is_set()
+    finally:
+        release.set()
+        dispatcher.dispose()
 
 
 def test_dispose_stops_worker_after_queue_saturation(monkeypatch) -> None:

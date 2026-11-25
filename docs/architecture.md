@@ -41,7 +41,7 @@ Planning stays in the local catalog. A workflow plan describes lower-level calls
 
 The registry exposes exactly 83 explicit `modeldesk_` names. Tools are not discovered from arbitrary source files at runtime. The server also registers the static `modeldesk://workflow-catalog` resource for workflow and use-case discovery; no MCP prompts are registered.
 
-MCPServer receives SDK-supported `Annotated`/`Field` parameter metadata and a typed output envelope. MCP validation and typed request validation complement each other: the former describes outer arguments, while the latter checks JSON payloads and domain-specific constraints.
+MCPServer serves modern discovery with `server/discover` and per-request metadata. Legacy clients can still use `initialize` on a separate stdio connection. The server validates tool inputs against their advertised schema before dispatch; domain validation checks additional constraints that require ModelDesk context.
 
 All handler results serialize the seven fields documented in [error-handling.md](error-handling.md). Nested `data` stays operation-specific. Wrappers forward to service methods and never perform direct COM work.
 
@@ -65,7 +65,7 @@ The gateway keeps the application connection within the bridge and resolves the 
 
 Automation callbacks run on one STA worker. A bounded queue prevents unlimited submissions; accepted work and dispatcher shutdown are coordinated. Queue serialization does not define dependency order between concurrently submitted MCP calls. Clients must await a mutation before issuing a dependent read or write.
 
-The default 60-second timeout bounds the caller's wait. It does not interrupt ModelDesk or cancel queued/running COM work. Collection snapshots default to at most 500 items and can report truncation. Configuration details are in [clients.md](clients.md).
+The default 60-second timeout bounds the caller's wait. A timeout or explicit cancellation prevents queued work from starting but does not interrupt a running ModelDesk operation. Collection snapshots default to at most 500 items and can report truncation. Configuration details are in [clients.md](clients.md).
 
 ## Mutation and Recovery Boundaries
 
@@ -73,11 +73,19 @@ Typed request validation rejects invalid inputs before mutation where possible. 
 
 Supported profile updates read back assigned values before optional Save/Download. A failed readback or later persistence action does not reverse preceding assignments. Immutable maneuver indices are never used as a reordering mechanism.
 
+High-impact tools with `dryRun` retain their offline effect preview by default. Add `inspectLive: true` to read an existing instance without starting it or applying a change. The optional `inspection` describes the observed context, comparable changes, conflicts, and conditions the server could not check. `targetVerified` concerns target resolution, not whether the operation is safe to execute. Existing native previews retain their separate contract.
+
 Exception-derived errors pass through local-path redaction. Domain data and artifact references can retain useful project paths. This local integration has no authentication or remote isolation layer; treat the client as a trusted caller with the server process's permissions.
 
 ## Verification Boundaries
 
 Metadata flags bypass application/runtime creation. Deterministic tests use source-shaped fakes and SDK schema checks; the COM-free smoke check verifies protocol discovery and safe local paths without requiring ModelDesk.
+
+Use the replay mode with sanitized fixed inputs to reproduce pure catalog queries or offline effect previews. Live inspection and all other invocations are refused rather than replayed against a live target. The output omits the process-specific session identifier.
+
+```powershell
+'{"tool":"modeldesk_get_workflow_plan","arguments":{"workflowName":"create_basic_traffic_scenario"}}' | uv run python -m modeldesk_mcp --replay
+```
 
 GitHub CI checks Windows/Python 3.14 installation, launcher metadata, syntax, pytest, and COM-free smoke behavior. These gates do not certify project-specific processing, test execution, downloads, AURELION, or every live COM object shape. Live checks need controlled fixtures and explicit mutation/runtime intent.
 

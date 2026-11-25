@@ -100,6 +100,15 @@ Blank ProgIDs and invalid or non-positive numeric values fall back to the defaul
 
 Collection snapshots can be truncated. Inspect their message and count rather than treating the returned items as an exhaustive catalog.
 
+## Updating An Earlier 0.2.0 Build
+
+Refresh tool discovery when replacing an earlier 0.2.0 build. The version and all 83 tool names remain the same, but the schema and maneuver-order response have changed:
+
+- Pass the typed payload directly in `valueJson`, not in an additional `value` wrapper. Table objects use `rows` and optional `columns`; use the exact property spelling published by discovery for typed road patches, such as `length` and `catalogPath`.
+- Use `matchesCurrentOrder`, `currentCount`, `requestedCount`, and `firstMismatchOffset` for full maneuver-order verification. The legacy `currentIndices` and `requestedIndices` strings contain at most 32 entries. When `indicesTruncated` is true, use the paginated maneuver lists to retrieve additional items.
+- For an attach-only preflight on an already-running instance, pass `dryRun: true` and `inspectLive: true` to a tool that advertises both. Check `inspection.conflicts` and `inspection.unverified` before proceeding. A clean preview is not a guarantee of success. For dynamic scenario patches, `inspection.writableProperties` provides bounded root-level COM setter names when available; `source: sample` describes an existing example, not a new object's guaranteed type. Offline `dryRun` is unchanged.
+- COM reads can start ModelDesk and no longer carry a read-only hint. A repeated model binding can run its initialization command again; do not treat it as a safe automatic retry.
+
 ## Package Sources and CI
 
 The lockfile records package versions, public PyPI registry URLs, and public download metadata. Dependency installation requires access to `pypi.org` and `files.pythonhosted.org`. A DNS or download failure is a package-source problem, not a ModelDesk COM error.

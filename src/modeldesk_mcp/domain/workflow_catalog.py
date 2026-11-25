@@ -108,7 +108,8 @@ def _create_scenario_plan() -> WorkflowPlan:
         "Add a fellow, then add its sequence; creation alone does not position it.",
         "Set fellow position with explicit Position -> YawAngleConstant -> Constant JSON and verify longitudinalPosition before saving or downloading.",
         "Set ego sequence StartPosition in meters along the route and InitialLongitudinalVelocity in km/h; verify both returned values.",
-        "Set maneuver sequence order and longitudinal/lateral behavior profiles.",
+        "Verify the existing immutable maneuver order and report any mismatch without reordering.",
+        "Set longitudinal and lateral behavior profiles separately from order verification.",
         "Use maneuver control to start, stop, or reset executable scenario behavior.",
         "Save and download the active experiment.",
     )

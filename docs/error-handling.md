@@ -52,7 +52,7 @@ Example validation result:
 }
 ```
 
-Invalid protocol messages or arguments rejected by the MCP SDK can fail before a tool handler runs; those transport/schema failures are distinct from this application-level envelope.
+Malformed protocol messages and unknown tool names receive JSON-RPC errors. Invalid arguments to a registered tool receive `isError: true` and a machine-readable validation result, even when schema validation rejects them before a handler runs. A handler's `ok: false` result also sets `isError: true`.
 
 ## Common Failure Types
 
@@ -61,7 +61,8 @@ Invalid protocol messages or arguments rejected by the MCP SDK can fail before a
 | `validation` | Invalid selector, JSON, number, shape, or unsupported property assignment. | Correct the input; do not repeat it unchanged. |
 | `not_found` | Missing file or unknown workflow name. | Verify the path/content or use a registered recipe. |
 | `invalid_state` | No active project/experiment, unavailable runtime context, or an unsupported state change. | Refresh status and inspect the requested domain. |
-| `timeout` | Caller stopped waiting for a dispatched COM operation. | Treat mutation outcome as uncertain; inspect before retrying. |
+| `timeout` | A dispatched call exceeded its timeout and was cancelled before it started. | Refresh the target if necessary before submitting again. |
+| `timeout_outcome_unknown` | A COM operation started and did not finish within the caller's timeout. | Do not retry automatically. Use the corresponding status or list tool to reconcile the target after the operation settles. |
 | `com_error` | Failure reported by Windows COM or the active ModelDesk object. | Inspect installation, registration, and active context. |
 | `unexpected` | An exception outside the known classifications. | Capture the operation and sanitized result for an issue report. |
 
@@ -95,11 +96,11 @@ Do not remove or restore objects that were not part of the intended operation. R
 
 ## Timeouts and Concurrent Calls
 
-The default COM wait timeout is 60 seconds. It bounds the caller's wait, not the COM operation itself: queued or running work is not cancelled when the waiter times out. A timed-out edit may complete afterward.
+The default COM wait timeout is 60 seconds. A timeout or an explicit client cancellation stops queued work that has not started. A running native call cannot be interrupted safely and can complete afterward. An explicit client cancellation may close the response before the server can report an outcome.
 
 The STA dispatcher serializes submitted operations, but concurrent MCP requests do not establish a dependency order. Do not send an edit and a dependent read in the same parallel batch. Wait for the edit result, then issue the read separately. After timeout, establish that the outstanding operation has settled before using the next inspection as a final-state guarantee.
 
-A client-level timeout can expire independently of the server timeout. See [clients.md](clients.md) for server environment variables.
+A client-level timeout can expire independently of the server timeout. If the client abandons the request without notifying the server, assume the outcome is unknown. See [clients.md](clients.md) for server environment variables.
 
 ## Paths and Trust Boundary
 
@@ -110,5 +111,7 @@ This is a trusted local stdio integration, not an authenticated hosted or multi-
 ## Reporting a Failure
 
 Include the tool name, sanitized inputs, `errorType`, message, warnings, and the active domain/context needed to reproduce it. State whether Save/Download or runtime actions were requested and whether a timeout occurred. Avoid credentials and unrelated private project content.
+
+Server-side invocation events are JSON on stderr; stdout is reserved for MCP. Each event includes the tool and version, a process-keyed input fingerprint, duration, outcome code, and `traceId`/`spanId`. An incoming W3C `traceparent` is continued on the worker. Input values are not written to this audit stream, and fingerprints are not comparable across server processes.
 
 Deterministic pytest and `modeldesk_mcp.smoke --skip-com-status` validate the server without live COM. They do not replace a controlled live reproduction when installation-specific behavior is involved.

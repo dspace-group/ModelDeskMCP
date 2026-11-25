@@ -3,6 +3,7 @@
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 import asyncio
+import json
 import os
 from pathlib import Path
 import re
@@ -83,6 +84,70 @@ def test_create_app_initialize_version_matches_package_version(monkeypatch: pyte
                 return result.server_info.version
 
     assert asyncio.run(initialize()) == __version__
+
+
+def test_stdio_modern_discovery_and_dispatch_without_initialize() -> None:
+    trace_id = "0123456789abcdef0123456789abcdef"
+
+    def request(method: str, *, version: str = "2026-07-28", **params: object) -> dict:
+        return {"jsonrpc": "2.0", "id": 1, "method": method, "params": {**params, "_meta": {
+            "io.modelcontextprotocol/protocolVersion": version,
+            "io.modelcontextprotocol/clientCapabilities": {},
+            "traceparent": f"00-{trace_id}-0123456789abcdef-01",
+        }}}
+
+    def exchange(message: dict) -> dict:
+        result = subprocess.run(
+            [sys.executable, "-m", "modeldesk_mcp"],
+            input=json.dumps(message) + "\n", capture_output=True, text=True, timeout=15, check=True,
+        )
+        if message["method"] == "tools/call":
+            event = next(json.loads(line) for line in result.stderr.splitlines() if line.startswith('{"event":'))
+            assert event["traceId"] == trace_id
+            assert event["spanId"] != "0123456789abcdef"
+            assert event["toolVersion"] == __version__
+            assert event["outcomeCode"] == ("validation" if message["params"].get("arguments") else -32602)
+            assert len(event["inputHash"]) == 64
+            assert event["durationMs"] >= 0
+            assert "private_argument_value" not in result.stderr
+        return json.loads(result.stdout)
+
+    discovery = exchange(request("server/discover"))["result"]
+    assert "2026-07-28" in discovery["supportedVersions"]
+    assert discovery["_meta"]["io.modelcontextprotocol/serverInfo"]["version"] == __version__
+    tools = exchange(request("tools/list"))["result"]["tools"]
+    assert tuple(tool["name"] for tool in tools) == EXPECTED_TOOL_NAMES
+    assert all(tool["inputSchema"]["additionalProperties"] is False for tool in tools)
+    assert exchange(request("server/discover", version="2099-01-01"))["error"]["code"] == -32022
+    assert exchange(request("tools/call", name="modeldesk_missing_tool"))["error"]["code"] == -32602
+    invalid = exchange(request("tools/call", name="modeldesk_get_workflow_plan", arguments={"unexpected": "private_argument_value"}))
+    assert invalid["result"]["isError"] is True
+    assert invalid["result"]["structuredContent"]["error"]["errorType"] == "validation"
+    assert "unexpected" in invalid["result"]["content"][0]["text"]
+
+
+def test_cli_replay_is_deterministic_and_does_not_run_mutations(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+    for tool, arguments in (
+        ("modeldesk_get_workflow_plan", {"workflowName": "create_basic_traffic_scenario"}),
+        ("modeldesk_start_maneuver", {"dryRun": True}),
+    ):
+        request = json.dumps({"tool": tool, "arguments": arguments})
+        results = []
+        for _attempt in range(2):
+            monkeypatch.setattr(sys, "stdin", StringIO(request))
+            assert server.main(["--replay"]) == 0
+            results.append(capsys.readouterr().out)
+        assert results[0] == results[1]
+
+    def fail_create_app() -> None:
+        pytest.fail("Unsafe replay must be rejected before creating the app.")
+
+    monkeypatch.setattr(server, "create_app", fail_create_app)
+    for arguments in ({}, {"dryRun": True, "inspectLive": True}):
+        request = json.dumps({"tool": "modeldesk_start_maneuver", "arguments": arguments})
+        monkeypatch.setattr(sys, "stdin", StringIO(request))
+        assert server.main(["--replay"]) == 2
+        assert json.loads(capsys.readouterr().out)["error"]["code"] == "replay_not_safe"
 
 
 def test_list_tools_cli_matches_expected_order() -> None:

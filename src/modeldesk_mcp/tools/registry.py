@@ -26,7 +26,9 @@ from pydantic import Field
 from typing_extensions import NotRequired, Required, TypedDict
 
 from modeldesk_mcp.contracts import ToolResult
+from modeldesk_mcp.contracts.requests import MAX_MATRIX_COLUMNS, MAX_MATRIX_ROWS, MAX_TABLE_COLUMNS, MAX_TABLE_ROWS, MAX_VECTOR_LENGTH
 from modeldesk_mcp.domain import ModelDeskService
+from modeldesk_mcp.tools.preview import EffectPreview, PREVIEW_EFFECTS
 
 
 EXPECTED_TOOL_NAMES = (
@@ -127,6 +129,84 @@ type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, J
 type JsonObject = dict[str, JsonValue]
 
 
+type ScalarPatchValue = None | bool | int | float | str | DynamicScalarPatch
+type DynamicScalarPatch = Annotated[dict[str, ScalarPatchValue], Field(max_length=64)]
+type JsonNumber = int | float
+type ParameterVector = Annotated[list[JsonNumber], Field(max_length=MAX_VECTOR_LENGTH)]
+type ParameterMatrix = Annotated[list[Annotated[list[JsonNumber], Field(max_length=MAX_MATRIX_COLUMNS)]], Field(max_length=MAX_MATRIX_ROWS)]
+type ParameterTableRows = Annotated[list[Annotated[list[JsonNumber], Field(max_length=MAX_TABLE_COLUMNS)]], Field(max_length=MAX_TABLE_ROWS)]
+
+
+class ParameterTableInput(TypedDict, total=False, closed=True):
+    rows: Required[ParameterTableRows]
+    columns: Annotated[list[str], Field(max_length=MAX_TABLE_COLUMNS)] | None
+
+
+type ParameterInputValue = str | bool | JsonNumber | ParameterVector | ParameterMatrix | ParameterTableRows | ParameterTableInput
+
+
+class RoadVectorInput(TypedDict, total=False, closed=True):
+    x: float | None
+    y: float | None
+    tangent: float | None
+
+
+class SplineParametersInput(TypedDict, total=False, closed=True):
+    b: float | None
+    c: float | None
+    d: float | None
+
+
+class RoadSegmentPatch(TypedDict, total=False, closed=True):
+    name: str | None
+    length: float | None
+    radius: float | None
+    angle: float | None
+    isInfinite: bool | None
+    splineDefinitionType: str | None
+    relativeEndVector: RoadVectorInput | None
+    absoluteEndVector: RoadVectorInput | None
+    splineParameterX: SplineParametersInput | None
+    splineParameterY: SplineParametersInput | None
+
+
+class RoadObjectPatch(TypedDict, total=False, closed=True):
+    name: str | None
+    catalogPath: str | None
+    s: float | None
+    d: float | None
+    laneMapping: Annotated[list[int], Field(max_length=64)] | None
+
+
+class EgoLongitudinalInput(TypedDict, total=False, closed=True):
+    StartPosition: JsonNumber
+    InitialLongitudinalVelocity: JsonNumber
+
+
+class ProfileConstant(TypedDict, closed=True):
+    Constant: JsonNumber
+
+
+class PositionSource(TypedDict, closed=True):
+    YawAngleConstant: ProfileConstant
+
+
+class ConstantSource(TypedDict, closed=True):
+    Constant: ProfileConstant
+
+
+class FellowPositionInput(TypedDict, closed=True):
+    Position: PositionSource
+
+
+class FellowVelocityInput(TypedDict, closed=True):
+    Velocity: ConstantSource
+
+
+class FellowLateralInput(TypedDict, closed=True):
+    LaneSelection: ConstantSource
+
+
 class ManeuverSelectorInput(TypedDict, closed=True):
     selectorKind: Literal["index", "name", "path", "completeName", "id"]
     selectorValue: str
@@ -163,6 +243,7 @@ _INPUT_TYPE_OVERRIDES: dict[tuple[str, str], Any] = {
     ("modeldesk_create_project_pool_file", "fileType"): Literal["0", "1", "2", "3", "4"],
     ("modeldesk_list_environment_pool_items", "group"): Literal["Objects", "Road", "Scenario", "Traffic Driver"],
     ("modeldesk_set_parameter_value", "valueKind"): Literal["Scalar", "Text", "Vector", "Matrix", "Table"],
+    ("modeldesk_set_parameter_value", "valueJson"): ParameterInputValue,
     ("modeldesk_add_road_segment", "segmentType"): Literal["Straight", "Circular", "Clothoid", "Spline"],
     ("modeldesk_update_road_segment", "segmentType"): Literal["Straight", "Circular", "Clothoid", "Spline"] | None,
     ("modeldesk_connect_roads", "mode"): Literal["Move", "Modify"],
@@ -206,23 +287,53 @@ _INPUT_TYPE_OVERRIDES: dict[tuple[str, str], Any] = {
     ("modeldesk_list_vehicle_object_types", "fellowSelectorKind"): Literal["active", "index", "name"] | None,
     ("modeldesk_set_vehicle_object_type", "fellowSelectorKind"): Literal["active", "index", "name"] | None,
     ("modeldesk_activate_plotting", "selectorKind"): Literal["index", "name"],
-    ("modeldesk_set_parameter_value", "valueJson"): JsonValue,
-    ("modeldesk_add_road_segment", "propertiesJson"): JsonObject | None,
-    ("modeldesk_update_road_segment", "propertiesJson"): JsonObject | None,
     ("modeldesk_add_road_object", "laneMappingJson"): tuple[int, ...],
-    ("modeldesk_update_road_object", "propertiesJson"): JsonObject | None,
+    ("modeldesk_add_road_segment", "propertiesJson"): RoadSegmentPatch | None,
+    ("modeldesk_update_road_segment", "propertiesJson"): RoadSegmentPatch | None,
+    ("modeldesk_update_road_object", "propertiesJson"): RoadObjectPatch | None,
     ("modeldesk_create_basic_road", "trafficObjectsJson"): tuple[BasicRoadTrafficObjectInput, ...],
-    ("modeldesk_add_scenario_fellow", "propertiesJson"): JsonObject | None,
-    ("modeldesk_update_scenario_fellow", "propertiesJson"): JsonObject | None,
-    ("modeldesk_add_scenario_maneuver", "propertiesJson"): JsonObject | None,
-    ("modeldesk_update_scenario_maneuver", "propertiesJson"): JsonObject | None,
+    ("modeldesk_add_scenario_fellow", "propertiesJson"): DynamicScalarPatch | None,
+    ("modeldesk_update_scenario_fellow", "propertiesJson"): DynamicScalarPatch | None,
+    ("modeldesk_add_scenario_maneuver", "propertiesJson"): DynamicScalarPatch | None,
+    ("modeldesk_update_scenario_maneuver", "propertiesJson"): DynamicScalarPatch | None,
     ("modeldesk_verify_scenario_maneuver_sequence", "maneuverSelectorsJson"): tuple[ManeuverSelectorInput, ...],
-    ("modeldesk_set_maneuver_behavior_profiles", "longitudinalProfileJson"): JsonObject | None,
-    ("modeldesk_set_maneuver_behavior_profiles", "lateralProfileJson"): JsonObject | None,
+    ("modeldesk_set_maneuver_behavior_profiles", "longitudinalProfileJson"): EgoLongitudinalInput | FellowPositionInput | FellowVelocityInput | None,
+    ("modeldesk_set_maneuver_behavior_profiles", "lateralProfileJson"): FellowLateralInput | DynamicScalarPatch | None,
     ("modeldesk_compare_captures", "signalSpecsJson"): tuple[str | SignalMappingInput, ...],
     ("modeldesk_compare_captures", "tolerancesJson"): CaptureTolerancesInput,
 }
-_INPUT_FIELD_CONSTRAINTS: dict[str, dict[str, int | float]] = {
+
+
+def input_schema_conditions(name: str) -> list[dict[str, Any]]:
+    if name == "modeldesk_set_parameter_value":
+        value_shapes = {
+            "Scalar": {"type": ["number", "string", "boolean"]},
+            "Text": {"type": "string"},
+            "Vector": {"$ref": "#/$defs/ParameterVector"},
+            "Matrix": {"$ref": "#/$defs/ParameterMatrix"},
+            "Table": {"anyOf": [{"$ref": "#/$defs/ParameterTableRows"}, {"$ref": "#/$defs/ParameterTableInput"}]},
+        }
+        return [
+            {"if": {"required": ["valueKind"], "properties": {"valueKind": {"const": kind}}},
+             "then": {"properties": {"valueJson": shape}}}
+            for kind, shape in value_shapes.items()
+        ]
+    if name == "modeldesk_set_maneuver_behavior_profiles":
+        empty_or_null = [{"type": "object", "maxProperties": 0}, {"type": "null"}]
+        return [{
+            "if": {"required": ["fellowSelectorKind"], "properties": {"fellowSelectorKind": {"enum": ["index", "name"]}}},
+            "then": {"properties": {
+                "longitudinalProfileJson": {"anyOf": [
+                    {"$ref": "#/$defs/FellowPositionInput"}, {"$ref": "#/$defs/FellowVelocityInput"}, *empty_or_null,
+                ]},
+                "lateralProfileJson": {"anyOf": [{"$ref": "#/$defs/FellowLateralInput"}, *empty_or_null]},
+            }},
+            "else": {"properties": {
+                "longitudinalProfileJson": {"anyOf": [{"$ref": "#/$defs/EgoLongitudinalInput"}, {"type": "null"}]},
+            }},
+        }]
+    return []
+_INPUT_FIELD_CONSTRAINTS: dict[str, dict[str, int | float | str]] = {
     "offset": {"ge": 0},
     "limit": {"ge": 1, "le": 500},
     "segmentIndex": {"ge": 0},
@@ -240,6 +351,8 @@ _INPUT_FIELD_CONSTRAINTS: dict[str, dict[str, int | float]] = {
     "laneMappingJson": {"max_length": 64},
     "trafficObjectsJson": {"max_length": 128},
     "signalSpecsJson": {"max_length": 500},
+    "workflowName": {"pattern": r"\S"},
+    "useCase": {"pattern": r"\S"},
 }
 
 class ToolArtifactEnvelope(TypedDict):
@@ -253,7 +366,7 @@ class ToolArtifactEnvelope(TypedDict):
 class ToolErrorEnvelope(TypedDict):
     """Stable structured error fields serialized by ``ToolResult.to_dict``."""
 
-    errorType: Literal["validation", "not_found", "timeout", "invalid_state", "com_error", "unexpected"]
+    errorType: Literal["validation", "not_found", "timeout", "timeout_outcome_unknown", "invalid_state", "com_error", "unexpected"]
     message: str
     operation: str
     recovery: str | None
@@ -490,13 +603,16 @@ _TOOL_DATA_TYPE_BY_NAME.update(
 
 def _tool_result_envelope_for(tool_name: str) -> Any:
     envelope_name = "".join(part.title() for part in tool_name.split("_")) + "ResultEnvelope"
+    data_type = _TOOL_DATA_TYPE_BY_NAME[tool_name]
+    if tool_name in PREVIEW_EFFECTS:
+        data_type = data_type | EffectPreview
     envelope = TypedDict(
         envelope_name,
         {
             "ok": bool,
             "operation": str,
             "sessionId": str,
-            "data": _TOOL_DATA_TYPE_BY_NAME[tool_name] | None,
+            "data": data_type | None,
             "warnings": list[str],
             "artifacts": list[ToolArtifactEnvelope],
             "error": ToolErrorEnvelope | None,
@@ -506,7 +622,7 @@ def _tool_result_envelope_for(tool_name: str) -> Any:
     return envelope
 
 
-_READ_ONLY_TOOL_NAMES = frozenset(
+_COM_READ_TOOL_NAMES = frozenset(
     {
         "modeldesk_get_status",
         "modeldesk_get_capabilities",
@@ -539,25 +655,19 @@ _READ_ONLY_TOOL_NAMES = frozenset(
         "modeldesk_list_plot_captures",
         "modeldesk_list_plot_layouts",
         "modeldesk_compare_captures",
-        "modeldesk_get_workflow_plan",
-        "modeldesk_list_tools_by_use_case",
     }
 )
+_READ_ONLY_TOOL_NAMES = frozenset({"modeldesk_get_workflow_plan", "modeldesk_list_tools_by_use_case"})
 _IDEMPOTENT_TOOL_NAMES = frozenset(
     {
         "modeldesk_save_project",
         "modeldesk_activate_experiment",
         "modeldesk_save_active_experiment",
         "modeldesk_activate_parameter_set",
-        "modeldesk_set_active_model",
         "modeldesk_set_scalar_parameter",
         "modeldesk_set_parameter_value",
         "modeldesk_activate_road",
-        "modeldesk_update_road",
-        "modeldesk_configure_road_lanes",
         "modeldesk_activate_scenario",
-        "modeldesk_set_scenario_road",
-        "modeldesk_set_vehicle_object_type",
         "modeldesk_activate_test",
         "modeldesk_activate_plotting",
         "modeldesk_stop_maneuver",
@@ -566,12 +676,6 @@ _IDEMPOTENT_TOOL_NAMES = frozenset(
 )
 _ADDITIVE_TOOL_NAMES = frozenset(
     {
-        "modeldesk_add_road",
-        "modeldesk_create_basic_road",
-        "modeldesk_add_road_segment",
-        "modeldesk_add_road_object",
-        "modeldesk_add_scenario_fellow",
-        "modeldesk_add_scenario_maneuver",
         "modeldesk_add_traffic_object",
         "modeldesk_add_traffic_object_folder",
     }
@@ -584,7 +688,9 @@ _NON_DESTRUCTIVE_CONTEXT_TOOL_NAMES = frozenset(
         "modeldesk_activate_plotting",
     }
 )
-_OPEN_WORLD_TOOL_NAMES = frozenset({"modeldesk_synchronize_aurelion"})
+_OPEN_WORLD_TOOL_NAMES = frozenset({
+    "modeldesk_open_project", "modeldesk_set_active_model", "modeldesk_compare_captures", "modeldesk_synchronize_aurelion",
+})
 _CONTEXT_FREE_TOOL_NAMES = frozenset({"modeldesk_get_workflow_plan", "modeldesk_list_tools_by_use_case"})
 _PROJECT_ONLY_TOOL_NAMES = frozenset(
     {
@@ -644,6 +750,7 @@ _LONG_RUNNING_TOOL_NAMES = frozenset(
     }
 )
 _REPLAY_RISK_NOTES = {
+    "modeldesk_set_active_model": "A retry binds the model again and can run initializationCommand again; inspect the active model before retrying.",
     "modeldesk_download_active_experiment": "Retrying downloads the active experiment to the runtime again; inspect runtime state before retrying after a timeout.",
     "modeldesk_open_project": "Retrying reopens the requested project and may save the currently active project according to saveActive; verify the active context before retrying.",
     "modeldesk_create_project_pool_file": "A retry may create another pool file or overwrite the target when overwriteExisting=true; inspect the target before retrying.",
@@ -652,6 +759,8 @@ _REPLAY_RISK_NOTES = {
     "modeldesk_close_project": "A retry acts on whichever project is active then and saves it first when save=true; check status before retrying.",
     "modeldesk_save_road_network_as": "A retry writes the same destination again and may replace it when overwriteExisting=true; inspect the file before retrying.",
     "modeldesk_add_road": "Each call adds another road; re-list roads after an ambiguous timeout before retrying.",
+    "modeldesk_update_road": "A retry reapplies the changes and repeats any requested save or download; inspect the target before retrying.",
+    "modeldesk_configure_road_lanes": "A retry reapplies the lane settings and repeats any requested save or download; inspect the target before retrying.",
     "modeldesk_add_road_segment": "Each call adds another segment; re-list the selected road after an ambiguous timeout before retrying.",
     "modeldesk_update_road_segment": "A retry reapplies the segment property patch and repeats any requested save/download; read the segment before retrying after a timeout.",
     "modeldesk_add_road_object": "Each call adds another road object; re-list the selected road after an ambiguous timeout before retrying.",
@@ -664,6 +773,8 @@ _REPLAY_RISK_NOTES = {
     "modeldesk_add_scenario_maneuver": "Each call adds another maneuver or fellow sequence; re-list the selected scope after an ambiguous timeout before retrying.",
     "modeldesk_update_scenario_maneuver": "A retry reapplies the maneuver property patch and repeats any requested save/download; read the maneuver before retrying after a timeout.",
     "modeldesk_set_maneuver_behavior_profiles": "A retry reapplies the behavior profiles and repeats any requested save/download; read the selected maneuver before retrying after a timeout.",
+    "modeldesk_set_scenario_road": "A retry reassigns the road and repeats any requested save or download; inspect the active scenario before retrying.",
+    "modeldesk_set_vehicle_object_type": "A retry reapplies the vehicle type and repeats any requested save or download; inspect the selected vehicle before retrying.",
     "modeldesk_add_traffic_object": "Each call adds another catalog object; re-list catalog objects after an ambiguous timeout before retrying.",
     "modeldesk_add_traffic_object_folder": "Each call adds another catalog folder; re-list catalog folders after an ambiguous timeout before retrying.",
     "modeldesk_remove_road": "An index may identify a different road after the first removal; re-list roads before retrying.",
@@ -725,7 +836,7 @@ _INPUT_FIELD_METADATA: dict[str, tuple[str, tuple[Any, ...] | None]] = {
     "parameterPath": ("Exact parameter path in the active parameter set.", ("Vehicle.Speed",)),
     "platformName": ("Optional model platform name passed to SetActiveModel.", ("ASM",)),
     "projectFile": ("Path to the ModelDesk project file (.prj) to open.", ("C:/ModelDesk/Projects/Vehicle/Vehicle.prj",)),
-    "propertiesJson": ("Object of tool-specific property changes; accepted names and values belong to the selected COM object. Omit the field or use {} for no property assignments.", ({},)),
+    "propertiesJson": ("Object of tool-specific property changes. For dynamic scenario objects, names depend on the installed ModelDesk COM type and values must be scalars, null, or nested scalar-only objects. Omit the field or use {} for no assignments.", ({},)),
     "recursive": ("Whether to include descendant items when listing an Environment Pool group.", (True,)),
     "referenceCapture": ("Reference MAT capture file name in the active project's Measurements folder.", ("reference.mat",)),
     "rightLaneCount": ("Number of right-side lanes to configure.", (1,)),
@@ -775,7 +886,7 @@ def _documented_tool_registrar(mcp: Any) -> Any:
                 annotations=ToolAnnotations(
                     read_only_hint=True if name in _READ_ONLY_TOOL_NAMES else None,
                     destructive_hint=False if name in _ADDITIVE_TOOL_NAMES | _NON_DESTRUCTIVE_CONTEXT_TOOL_NAMES else None,
-                    idempotent_hint=True if name in _READ_ONLY_TOOL_NAMES | _IDEMPOTENT_TOOL_NAMES else None,
+                    idempotent_hint=True if name in _READ_ONLY_TOOL_NAMES | _COM_READ_TOOL_NAMES | _IDEMPOTENT_TOOL_NAMES else None,
                     open_world_hint=name in _OPEN_WORLD_TOOL_NAMES,
                 ),
             )
@@ -794,6 +905,15 @@ def _documented_tool_registrar(mcp: Any) -> Any:
                     description, examples = _INPUT_FIELD_METADATA[parameter_name]
                     if name == "modeldesk_set_maneuver_behavior_profiles" and parameter_name == "segmentIndex":
                         description = "Zero-based Fellow segment position; ego requires 0."
+                    elif name == "modeldesk_close_project" and parameter_name == "save":
+                        description, examples = "Whether to save the active project before closing it. Defaults to true.", (True,)
+                    elif name == "modeldesk_save_road_network_as" and parameter_name == "overwriteExisting":
+                        description = "Whether to replace the existing .rd destination file supplied as fileName."
+                    elif name in {"modeldesk_update_scenario_fellow", "modeldesk_remove_scenario_fellow"}:
+                        if parameter_name == "fellowSelectorKind":
+                            description, examples = "Select a listed fellow by index or name.", ("index",)
+                        elif parameter_name == "fellowSelectorValue":
+                            description, examples = "Listed zero-based fellow index or exact name.", ("0",)
                     field_metadata: dict[str, Any] = {"description": description}
                     field_metadata.update(_INPUT_FIELD_CONSTRAINTS.get(parameter_name, {}))
                     if examples is not None:
@@ -878,14 +998,18 @@ def _document_tool_contract(name: str, description: str | None, input_parameters
         preconditions = "ModelDesk COM must be registered and the active project, experiment, and target domain required by this operation must be available."
         failure_codes = ("validation", "timeout", "invalid_state", "com_error", "unexpected") if input_parameters else ("timeout", "invalid_state", "com_error", "unexpected")
 
+    if "timeout" in failure_codes:
+        failure_codes += ("timeout_outcome_unknown",)
     clauses = [
         purpose,
         f"Preconditions: {preconditions}",
         f"Possible failure codes: {', '.join(failure_codes)}.",
     ]
+    if name in _COM_READ_TOOL_NAMES:
+        clauses.append("Reads product state without editing it, but can start ModelDesk if no active instance is available.")
     if name in _LONG_RUNNING_TOOL_NAMES:
         clauses.append(
-            "Timeout behavior: the caller waits up to MODELDESK_MCP_OPERATION_TIMEOUT_SECONDS (default 60); accepted COM work is not canceled on timeout, and this tool emits no progress notifications."
+            "Timeout behavior: the caller waits up to MODELDESK_MCP_OPERATION_TIMEOUT_SECONDS (default 60) for COM work. Queued work is canceled; if already running, the outcome is unknown. Verify the target state before retrying."
         )
     return "\n\n".join(clauses)
 

@@ -126,6 +126,31 @@ def snapshot_collection(collection: Any, item_kind: str, max_items: int, offset:
     return CollectionSnapshot(count, tuple(items), is_truncated, end_offset if is_truncated else None)
 
 
+def declared_scalar_setters(instance: Any) -> tuple[list[str], bool]:
+    """List scalar PROPERTYPUT declarations without reading or writing target values."""
+
+    import pythoncom
+
+    scalar_types = {
+        pythoncom.VT_BOOL, pythoncom.VT_BSTR, pythoncom.VT_I1, pythoncom.VT_I2, pythoncom.VT_I4, pythoncom.VT_I8,
+        pythoncom.VT_UI1, pythoncom.VT_UI2, pythoncom.VT_UI4, pythoncom.VT_UI8, pythoncom.VT_INT, pythoncom.VT_UINT,
+        pythoncom.VT_R4, pythoncom.VT_R8, pythoncom.VT_VARIANT,
+    }
+    type_info = instance._oleobj_.GetTypeInfo()
+    function_count = type_info.GetTypeAttr()[6]
+    names: set[str] = set()
+    for index in range(min(function_count, 512)):
+        descriptor = type_info.GetFuncDesc(index)
+        if descriptor.invkind != pythoncom.INVOKE_PROPERTYPUT or len(descriptor.args) != 1:
+            continue
+        variant_type = descriptor.args[0][0]
+        if not isinstance(variant_type, int) or variant_type not in scalar_types:
+            continue
+        if member_names := type_info.GetNames(descriptor.memid):
+            names.add(member_names[0])
+    return sorted(names, key=str.casefold)[:64], function_count > 512 or len(names) > 64
+
+
 def resolve_item(collection: Any, selector: Selector) -> Any:
     """Resolve a non-active selector against a COM collection."""
 

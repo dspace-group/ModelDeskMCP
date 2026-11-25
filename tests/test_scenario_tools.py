@@ -405,6 +405,45 @@ def _gateway_for_application(application: Any) -> ModelDeskAutomationGateway:
     return gateway
 
 
+def test_live_scenario_patch_preview_exposes_declared_scalar_setters(monkeypatch) -> None:
+    client = pytest.importorskip("win32com.client")
+    pythoncom = pytest.importorskip("pythoncom")
+
+    class TypeInfo:
+        def GetTypeAttr(self):
+            return (None, None, None, None, None, None, 4)
+
+        def GetFuncDesc(self, index):
+            return (
+                SimpleNamespace(invkind=pythoncom.INVOKE_PROPERTYPUT, args=((pythoncom.VT_BSTR,),), memid=0),
+                SimpleNamespace(invkind=pythoncom.INVOKE_PROPERTYGET, args=(), memid=1),
+                SimpleNamespace(invkind=pythoncom.INVOKE_PROPERTYPUTREF, args=((pythoncom.VT_DISPATCH,),), memid=2),
+                SimpleNamespace(invkind=pythoncom.INVOKE_PROPERTYPUT, args=((pythoncom.VT_I4,), (pythoncom.VT_R8,)), memid=3),
+            )[index]
+
+        def GetNames(self, member):
+            return (("Label",), ("ReadOnly",), ("Object",), ("Indexed",))[member]
+
+    fellow = SimpleNamespace(Name="Truck1", _oleobj_=SimpleNamespace(GetTypeInfo=TypeInfo))
+    fellows = _FakeComCollection([fellow])
+    application = SimpleNamespace(ActiveProject=SimpleNamespace(ActiveExperiment=SimpleNamespace(
+        TrafficScenario=SimpleNamespace(Fellows=fellows),
+    )))
+    gateway = _gateway_for_application(application)
+    monkeypatch.setattr(client, "GetActiveObject", lambda _prog_id: application)
+    monkeypatch.setattr(client, "Dispatch", lambda *_args: pytest.fail("Preview must never start COM."))
+
+    update = gateway.inspect_preview("modeldesk_update_scenario_fellow", {
+        "fellowSelectorKind": "index", "fellowSelectorValue": "0", "name": "New name",
+    })
+    assert update["targetVerified"]
+    assert update["writableProperties"] == {"field": "propertiesJson", "source": "target", "names": ["Label"], "truncated": False}
+    assert update["changes"] == [{"field": "name", "before": "Truck1", "after": "New name"}]
+    added = gateway.inspect_preview("modeldesk_add_scenario_fellow", {})
+    assert added["writableProperties"]["source"] == "sample"
+    assert fellows.items == [fellow] and fellow.Name == "Truck1"
+
+
 def test_scenario_removal_dry_runs_resolve_ego_and_fellow_targets_without_mutating_collections() -> None:
     fellow = SimpleNamespace(Name="Truck1")
     maneuver = SimpleNamespace(Name="Turn")
@@ -1322,14 +1361,36 @@ def test_fellow_sequence_order_resolves_selectors_to_positions(
     )
 
     assert result.ok, result.to_dict()
-    assert result.to_dict()["data"]["details"] == {
+    details = result.to_dict()["data"]["details"]
+    expected_details = {
         "fellowSelectorKind": "Name",
         "fellowSelectorValue": "Truck1",
         "currentIndices": "[0,1]",
         "requestedIndices": json.dumps(expected_indices, separators=(",", ":")),
         "matchesCurrentOrder": expected_match,
     }
+    assert {key: details[key] for key in expected_details} == expected_details
+    assert details["currentCount"] == "2"
+    assert details["requestedCount"] == str(len(expected_indices))
     assert names == ["Sequence1", "Sequence2"]
+    assert events == []
+
+
+def test_fellow_order_response_is_bounded_but_compares_beyond_excerpt() -> None:
+    gateway, _, events = _fellow_order_context([f"Sequence{index}" for index in range(40)])
+    indices = [*range(39), 38]
+    result = gateway.verify_scenario_maneuver_sequence(
+        Selector.create("name", "Truck1"),
+        json.dumps([{"selectorKind": "index", "selectorValue": str(index)} for index in indices]),
+    )
+
+    assert result.ok
+    details = result.to_dict()["data"]["details"]
+    assert details["currentCount"] == details["requestedCount"] == "40"
+    assert details["indicesTruncated"] == "true"
+    assert len(json.loads(details["currentIndices"])) == len(json.loads(details["requestedIndices"])) == 32
+    assert details["firstMismatchOffset"] == "39"
+    assert details["matchesCurrentOrder"] == "false"
     assert events == []
 
 

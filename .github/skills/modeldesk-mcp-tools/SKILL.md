@@ -86,7 +86,7 @@ Every call returns a structured `ToolResult`-shaped value. Check the success fla
 
 ## Timeouts
 
-The default `MODELDESK_MCP_OPERATION_TIMEOUT_SECONDS` is `60`. This bounds the caller's wait only; the dispatcher does not cancel COM work that has already been accepted. Processing, test execution, downloads, synchronization, and maneuver control may therefore continue after a timeout. Treat the outcome as unknown, do not retry automatically, and refresh status plus the affected list/state before deciding what to do next.
+The default `MODELDESK_MCP_OPERATION_TIMEOUT_SECONDS` is `60`. A timeout cancels queued COM work before it starts. With `timeout_outcome_unknown`, it already started and may continue. Do not retry automatically; refresh status and the affected list/state after the operation settles. If the client gives up without sending cancellation, assume the outcome is unknown.
 
 ## Safe cleanup
 

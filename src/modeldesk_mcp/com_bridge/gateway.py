@@ -23,8 +23,9 @@ from typing import Any
 
 from modeldesk_mcp import __version__
 import modeldesk_mcp.com_bridge.accessor as com
-from modeldesk_mcp.com_bridge.dispatcher import ComStaDispatcher
+from modeldesk_mcp.com_bridge.dispatcher import ComOperationTimeout, ComStaDispatcher
 from modeldesk_mcp.config import ComGatewayOptions
+from modeldesk_mcp.contracts.models import PreviewInspection, PreviewPropertyScope, PreviewScalar
 from modeldesk_mcp.contracts import (
     BasicRoadCreatedTrafficObject,
     BasicRoadCreationInfo,
@@ -691,12 +692,22 @@ class ModelDeskAutomationGateway:
                     if len(positions) != 1:
                         raise RuntimeError(f"Cannot uniquely resolve maneuver selector '{selector.by.value}:{selector.value}'.")
                     requested_indices.append(positions[0])
-            matches_current_order = requested_indices == current_indices
+            shared_count = min(len(current_indices), len(requested_indices))
+            mismatch = next(
+                (index for index in range(shared_count) if current_indices[index] != requested_indices[index]),
+                shared_count if len(current_indices) != len(requested_indices) else None,
+            )
+            matches_current_order = mismatch is None
+            excerpt_limit = 32
             details = {
                 "fellowSelectorKind": fellow_selector.by.value,
                 "fellowSelectorValue": fellow_selector.value,
-                "currentIndices": json.dumps(current_indices, separators=(",", ":")),
-                "requestedIndices": json.dumps(requested_indices, separators=(",", ":")),
+                "currentIndices": json.dumps(current_indices[:excerpt_limit], separators=(",", ":")),
+                "requestedIndices": json.dumps(requested_indices[:excerpt_limit], separators=(",", ":")),
+                "currentCount": str(len(current_indices)),
+                "requestedCount": str(len(requested_indices)),
+                "firstMismatchOffset": None if mismatch is None else str(mismatch),
+                "indicesTruncated": str(max(len(current_indices), len(requested_indices)) > excerpt_limit).lower(),
                 "matchesCurrentOrder": str(matches_current_order).lower(),
             }
             return OperationInfo(
@@ -1175,6 +1186,22 @@ class ModelDeskAutomationGateway:
             return ToolResult.success(operation_name, self._session_id, result)
         except Exception as exception:  # noqa: BLE001 - converted to ToolResult at boundary.
             return self._create_failure(operation_name, exception)
+
+    def inspect_preview(self, tool: str, arguments: dict[str, Any]) -> PreviewInspection:
+        """Observe an existing instance without using the startup fallback."""
+
+        def inspect() -> PreviewInspection:
+            import win32com.client
+
+            application = win32com.client.GetActiveObject(self._options.prog_id)
+            return _inspect_preview_state(application, tool, arguments)
+
+        try:
+            return self._dispatcher.invoke(inspect, self._options.operation_timeout_seconds)
+        except Exception as exception:
+            return PreviewInspection(targetVerified=False, observed={}, changes=[], conflicts=[], unverified=[
+                f"Live state could not be inspected: {public_error_message(exception)}",
+            ])
 
     def _get_or_create_application(self) -> Any:
         if self._application is not None:
@@ -1719,6 +1746,16 @@ class ModelDeskAutomationGateway:
         return DomainSummary(domain, True, 1, (item,) if offset == 0 else (), properties)
 
     def _create_failure(self, operation_name: str, exception: Exception) -> ToolResult:
+        if isinstance(exception, ComOperationTimeout):
+            cancelled = exception.cancelled_before_start
+            error = ToolError(
+                "timeout" if cancelled else "timeout_outcome_unknown",
+                str(exception),
+                operation_name,
+                "The request never started." if cancelled else "Use the corresponding read-only status or listing tool to verify the target before retrying.",
+                cancelled,
+            )
+            return ToolResult.failure(operation_name, self._session_id, error)
         error_type = _classify_error(exception)
         retryable = error_type in ("timeout", "com_error")
         error = ToolError(error_type, public_error_message(exception), operation_name, "Check ModelDesk state, active project, active experiment, and COM registration.", retryable)
@@ -1727,6 +1764,283 @@ class ModelDeskAutomationGateway:
     def _validation_failure(self, operation_name: str, message: str) -> ToolResult:
         error = ToolError("validation", public_error_message(message), operation_name, "Correct the tool input and call the tool again.")
         return ToolResult.failure(operation_name, self._session_id, error)
+
+
+def _inspect_preview_state(application: Any, tool: str, arguments: dict[str, Any]) -> PreviewInspection:
+    inspection = PreviewInspection(targetVerified=False, observed={}, changes=[], conflicts=[], unverified=[])
+    observed = inspection["observed"]
+    conflicts = inspection["conflicts"]
+    unverified = inspection["unverified"]
+
+    def describe(target: Any) -> str | None:
+        return com.get_first_string_property(target, "Name", "CompleteName", "ProjectName") if target is not None else None
+
+    def compare(field: str, before: PreviewScalar, after: PreviewScalar) -> None:
+        _record_preview_change(inspection, field, before, after)
+
+    project_available, project = com.try_get_property(application, "ActiveProject")
+    experiment_available, experiment = com.try_get_property(project, "ActiveExperiment") if project is not None else (False, None)
+    observed["activeProject"] = describe(project)
+    observed["activeExperiment"] = describe(experiment)
+    if not project_available:
+        unverified.append("Active project could not be read.")
+    if tool == "modeldesk_open_project":
+        if observed["activeProject"] is not None:
+            compare("activeProject", observed["activeProject"], arguments["projectFile"])
+            unverified.append("Current project unsaved changes cannot be verified.")
+        candidate = Path(arguments["projectFile"])
+        if not candidate.is_absolute() or candidate.drive.startswith("\\\\"):
+            unverified.append("Only absolute local project destinations are checked by the live preview.")
+        else:
+            inspection["targetVerified"] = candidate.is_file()
+            if not inspection["targetVerified"]:
+                conflicts.append("Requested project file is missing or not accessible.")
+        if arguments.get("initialExperiment"):
+            unverified.append("The initial experiment cannot be verified without opening the requested project.")
+        return inspection
+    if project is None:
+        if project_available:
+            conflicts.append("There is no active project.")
+        return inspection
+    if tool == "modeldesk_save_project":
+        inspection["targetVerified"] = observed["activeProject"] is not None
+        unverified.append("Current project unsaved changes cannot be verified.")
+        return inspection
+    if tool == "modeldesk_activate_experiment":
+        current = experiment
+        selector = Selector.create(arguments.get("selectorKind"), arguments.get("selectorValue"))
+        try:
+            target = com.resolve_item(_get_required_property(project, "Experiments"), selector)
+        except Exception:
+            conflicts.append("The requested experiment could not be resolved in the active project.")
+        else:
+            inspection["targetVerified"] = target is not None
+            compare("activeExperiment", describe(current), describe(target))
+        if arguments.get("saveActive", True):
+            unverified.append("Current experiment unsaved changes cannot be verified.")
+        return inspection
+    if experiment is None:
+        if experiment_available:
+            conflicts.append("There is no active experiment.")
+        else:
+            unverified.append("Active experiment could not be read.")
+        return inspection
+    if tool == "modeldesk_activate_parameter_set":
+        selector = Selector.create(arguments.get("selectorKind"), arguments.get("selectorValue"))
+        _, current = com.try_get_property(experiment, "ActiveParameterSet")
+        observed["activeParameterSet"] = describe(current)
+        try:
+            target = com.resolve_item(_get_required_property(experiment, "ParameterSets"), selector)
+        except Exception:
+            conflicts.append("The requested parameter set could not be resolved in the active experiment.")
+        else:
+            inspection["targetVerified"] = target is not None
+            compare("activeParameterSet", describe(current), describe(target))
+        if arguments.get("saveActive", True):
+            unverified.append("Current parameter set unsaved changes cannot be verified.")
+    elif tool == "modeldesk_set_active_model":
+        _, models = com.try_get_property(experiment, "Models")
+        _, current = com.try_get_property(models, "ActiveModelInfo") if models is not None else (False, None)
+        inspection["targetVerified"] = models is not None and observed["activeExperiment"] is not None
+        for field, member in (("modelFilePath", "Path"), ("mlWorkingDirectory", "MATLABWorkingDirectory"), ("platformName", "PlatformName")):
+            observed[field] = com.get_string_property(current, member) if current is not None else None
+            if arguments.get(field) is not None:
+                compare(field, observed[field], arguments[field])
+        unverified.append("Model compatibility and initialization effects cannot be verified without binding it.")
+    elif tool in {"modeldesk_save_active_experiment", "modeldesk_download_active_experiment",
+                  "modeldesk_start_maneuver", "modeldesk_stop_maneuver", "modeldesk_reset_maneuver"}:
+        inspection["targetVerified"] = observed["activeExperiment"] is not None
+        unverified.append("Unsaved or deployed runtime state cannot be verified from the experiment identity.")
+    elif tool in _SCENARIO_PATCH_PREVIEWS:
+        _inspect_scenario_patch(application, tool, arguments, inspection)
+    elif tool in _ROAD_EDIT_PREVIEWS:
+        _inspect_road_edit(application, tool, arguments, inspection)
+    elif tool == "modeldesk_set_scenario_road":
+        readable, scenario = com.try_get_property(experiment, "TrafficScenario")
+        if not readable or scenario is None:
+            conflicts.append("The active traffic scenario is unavailable.")
+        else:
+            inspection["targetVerified"] = True
+            observed["trafficScenario"] = describe(scenario)
+            readable, current = com.try_get_property(scenario, "Road")
+            if readable:
+                compare("roadName", current if isinstance(current, str) else describe(current), arguments["roadName"])
+            else:
+                unverified.append("The current road reference could not be read.")
+            unverified.append("The native road reference assignment is not executed during preflight.")
+    elif tool == "modeldesk_set_vehicle_object_type":
+        try:
+            selector = Selector.create(arguments.get("fellowSelectorKind"), arguments.get("fellowSelectorValue"))
+            manager, domain = _get_vehicle_object_type_manager(application, selector, arguments.get("maneuverIndex", 0))
+            target = _available_type_elements(manager)[arguments["elementIndex"]]
+        except Exception:
+            conflicts.append("The requested vehicle type could not be resolved.")
+        else:
+            _, current = com.try_get_property(manager, "ActiveElement")
+            inspection["targetVerified"] = True
+            observed["vehicleTypeDomain"] = domain
+            compare("vehicleObjectType", describe(current), describe(target))
+    elif tool == "modeldesk_run_processing":
+        _, current = com.try_get_property(experiment, "ActiveParameterSet")
+        observed["activeParameterSet"] = describe(current)
+        inspection["targetVerified"] = current is not None
+        if current is None:
+            conflicts.append("The active parameter set is unavailable.")
+        unverified.append("Processing readiness and results cannot be verified without execution.")
+    elif tool in {"modeldesk_execute_test", "modeldesk_synchronize_aurelion"}:
+        unverified.append("The execution target or external state is not verified by attach-only inspection.")
+    else:
+        unverified.append("Native target details for this operation could not be verified.")
+    return inspection
+
+
+def _record_preview_change(inspection: PreviewInspection, field: str, before: PreviewScalar, after: PreviewScalar) -> None:
+    if before != after:
+        inspection["changes"].append({"field": field, "before": before, "after": after})
+
+
+_ROAD_EDIT_PREVIEWS = frozenset({
+    "modeldesk_add_road", "modeldesk_update_road", "modeldesk_add_road_segment", "modeldesk_update_road_segment",
+    "modeldesk_configure_road_lanes", "modeldesk_add_road_object", "modeldesk_update_road_object",
+    "modeldesk_connect_roads", "modeldesk_create_basic_road",
+})
+
+
+def _inspect_road_edit(application: Any, tool: str, arguments: dict[str, Any], inspection: PreviewInspection) -> None:
+    observed = inspection["observed"]
+    unverified = inspection["unverified"]
+
+    def compare_scalars(target: Any, patch: dict[str, Any], members: dict[str, str]) -> None:
+        for field in patch:
+            if patch[field] is None:
+                continue
+            if field not in members:
+                unverified.append(f"The current {field} value could not be verified.")
+                continue
+            readable, current = com.try_get_property(target, members[field])
+            if readable and (current is None or isinstance(current, (str, bool, int, float))):
+                _record_preview_change(inspection, field, current, patch[field])
+            else:
+                unverified.append(f"The current {field} value could not be read.")
+
+    try:
+        network = _get_active_road_network(application)
+        observed["roadNetwork"] = com.get_first_string_property(network, "Name", "CompleteName")
+        if tool in {"modeldesk_add_road", "modeldesk_create_basic_road"}:
+            count = com.get_count(_get_required_property(network, "Roads"))
+            _record_preview_change(inspection, "roadCount", count, count + 1)
+        elif tool == "modeldesk_connect_roads":
+            for prefix, default_point in (("source", RoadConnectionPointKind.END), ("target", RoadConnectionPointKind.START)):
+                road = _resolve_road(network, Selector.create(arguments[prefix + "RoadSelectorKind"], arguments[prefix + "RoadSelectorValue"]))
+                _resolve_road_connection_point(road, _parse_connection_point(arguments.get(prefix + "Point"), default_point))
+                observed[prefix + "Road"] = _read_road_name(road)
+            unverified.append("Connectivity and geometry changes cannot be predicted without applying the operation.")
+        else:
+            road = _resolve_road(network, Selector.create(arguments["roadSelectorKind"], arguments["roadSelectorValue"]))
+            observed["road"] = _read_road_name(road)
+            if tool == "modeldesk_update_road":
+                compare_scalars(road, {"name": arguments["name"]}, {"name": "Name"})
+            elif tool.endswith("road_segment"):
+                segments = _get_required_property(road, "Segments")
+                if tool == "modeldesk_add_road_segment":
+                    count = com.get_count(segments)
+                    if arguments.get("insertAfterSegmentIndex", -1) >= count:
+                        inspection["conflicts"].append("The requested insertion segment does not exist.")
+                        return
+                    _record_preview_change(inspection, "segmentCount", count, count + 1)
+                else:
+                    segment = _get_active_segment_element(_invoke_required_item(segments, arguments["segmentIndex"], "segment"))
+                    if arguments.get("segmentType") is not None:
+                        _record_preview_change(inspection, "segmentType", _read_segment_type(segment).display_name, arguments["segmentType"])
+                    compare_scalars(segment, arguments.get("propertiesJson") or {}, {
+                        "name": "Name", "length": "Length", "radius": "Radius", "angle": "Angle", "isInfinite": "IsInfinite",
+                    })
+            elif tool.endswith("road_object"):
+                objects = _get_required_property(road, "Objects")
+                if tool == "modeldesk_add_road_object":
+                    _validate_road_object_position(arguments["s"], arguments["d"], _read_double_property(road, "Length"))
+                    count = com.get_count(objects)
+                    _record_preview_change(inspection, "objectCount", count, count + 1)
+                else:
+                    target = _invoke_required_item(objects, arguments["objectIndex"], "road object")
+                    patch = arguments.get("propertiesJson") or {}
+                    coordinates = {field: patch[field] for field in ("s", "d") if patch.get(field) is not None}
+                    if coordinates:
+                        position = _get_required_property(target, "Position")
+                        _validate_road_object_position(
+                            coordinates["s"] if "s" in coordinates else _read_double_property(position, "S"),
+                            coordinates["d"] if "d" in coordinates else _read_double_property(position, "D"),
+                            _read_double_property(road, "Length"),
+                        )
+                        compare_scalars(position, coordinates, {"s": "S", "d": "D"})
+                    compare_scalars(target, {field: value for field, value in patch.items() if field not in coordinates}, {"name": "Name"})
+            else:
+                sections = _get_required_property(road, "LaneSections")
+                index = arguments.get("laneSectionIndex", 0)
+                count = com.get_count(sections)
+                length = arguments.get("laneSectionLength", 0.0) or _read_double_property(road, "Length")
+                if index == count:
+                    _record_preview_change(inspection, "laneSectionCount", count, count + 1)
+                else:
+                    section = _invoke_required_item(sections, index, "lane section")
+                    compare_scalars(section, {"laneSectionLength": length}, {"laneSectionLength": "Length"})
+                unverified.append("The final lane layout and widths are not calculated during preflight.")
+        inspection["targetVerified"] = True
+    except Exception:
+        inspection["conflicts"].append("A required road target or position did not resolve during preflight.")
+    if arguments.get("save") or arguments.get("download"):
+        unverified.append("Unsaved or deployed road state is not verified by this preflight.")
+
+
+_SCENARIO_PATCH_PREVIEWS = frozenset({
+    "modeldesk_add_scenario_fellow", "modeldesk_update_scenario_fellow", "modeldesk_add_scenario_maneuver",
+    "modeldesk_update_scenario_maneuver", "modeldesk_set_maneuver_behavior_profiles",
+})
+
+
+def _inspect_scenario_patch(application: Any, tool: str, arguments: dict[str, Any], inspection: PreviewInspection) -> None:
+    fellow_selector = Selector.create(arguments.get("fellowSelectorKind"), arguments.get("fellowSelectorValue"))
+    add_mode = tool.startswith("modeldesk_add_")
+    is_fellow_tool = tool.endswith("scenario_fellow")
+    is_profile_tool = tool == "modeldesk_set_maneuver_behavior_profiles"
+    try:
+        collection = _get_scenario_fellows_collection(application) if is_fellow_tool else _get_scenario_maneuvers_collection(application, fellow_selector)
+        if add_mode:
+            target = com.invoke_item(collection, 0) if com.get_count(collection) else None
+            inspection["targetVerified"] = True
+        elif is_fellow_tool:
+            target = _resolve_fellow(collection, fellow_selector)
+        else:
+            requested = Selector.create(arguments.get("maneuverSelectorKind"), arguments.get("maneuverSelectorValue"))
+            resolved = _maneuver_selector_to_collection_selector(collection, fellow_selector, requested)
+            target = com.resolve_item(collection, resolved)
+            if is_profile_tool and fellow_selector.by == SelectorKind.ACTIVE:
+                target = _resolve_ego_maneuver_sequence(target)
+    except Exception:
+        inspection["conflicts"].append("The requested scenario target could not be resolved without mutation.")
+        return
+
+    if target is None:
+        inspection["unverified"].append("The collection is empty; there is no existing object to sample for writable member declarations.")
+        return
+    name = com.get_first_string_property(target, "Name", "CompleteName")
+    inspection["observed"]["sampleObject" if add_mode else "targetObject"] = name
+    inspection["targetVerified"] = True
+    if is_fellow_tool and not add_mode and arguments.get("name") and name is not None and arguments["name"] != name:
+        inspection["changes"].append({"field": "name", "before": name, "after": arguments["name"]})
+    if is_profile_tool and fellow_selector.by != SelectorKind.ACTIVE:
+        inspection["unverified"].append("Fellow profile values cannot be resolved without activating a profile.")
+        return
+    try:
+        names, truncated = com.declared_scalar_setters(target)
+    except Exception:
+        inspection["unverified"].append("This automation object does not expose usable writable-member type information.")
+        return
+    inspection["writableProperties"] = PreviewPropertyScope(
+        field="lateralProfileJson" if is_profile_tool else "propertiesJson",
+        source="sample" if add_mode else "target", names=names, truncated=truncated,
+    )
+    inspection["unverified"].append("Writable-member declarations cover the root object only and do not verify nested values or native write preconditions.")
 
 
 def _get_active_project(application: Any) -> Any:

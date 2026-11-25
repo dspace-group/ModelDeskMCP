@@ -344,6 +344,8 @@ name = "modeldesk-mcp"
 version = "0.2.0"
 source = { editable = "." }
 dependencies = [
+    { name = "anyio" },
+    { name = "jsonschema" },
     { name = "mcp", extra = ["cli"] },
     { name = "opentelemetry-api" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
@@ -357,6 +359,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "anyio", specifier = ">=4.11,<5" },
+    { name = "jsonschema", specifier = ">=4,<5" },
     { name = "mcp", extras = ["cli"], specifier = ">=2,<3" },
     { name = "opentelemetry-api", specifier = ">=1.45.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },

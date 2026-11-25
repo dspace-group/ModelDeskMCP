@@ -12,15 +12,31 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from concurrent.futures import Future, TimeoutError
+from contextvars import copy_context
 from dataclasses import dataclass
 import queue
 import threading
+from time import monotonic
 from typing import Generic, TypeVar
+
+from anyio.from_thread import NoEventLoopError, check_cancelled
 
 
 T = TypeVar("T")
 MAX_QUEUED_OPERATIONS = 256
 SHUTDOWN_TIMEOUT_SECONDS = 5.0
+CANCELLATION_POLL_SECONDS = 0.05
+
+
+class ComOperationTimeout(TimeoutError):
+    def __init__(self, timeout_seconds: float, *, cancelled_before_start: bool) -> None:
+        self.cancelled_before_start = cancelled_before_start
+        outcome = (
+            "Cancelled before execution."
+            if cancelled_before_start
+            else "Execution has started and its outcome is unknown. Do not retry until you verify the target state."
+        )
+        super().__init__(f"COM operation timed out after {timeout_seconds} seconds. {outcome}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,20 +62,21 @@ class ComStaDispatcher:
         )
         self._worker_thread.start()
 
-    def invoke(self, operation: Callable[[], T], timeout_seconds: int) -> T:
-        """Run an operation on the STA and bound only the caller's wait.
-
-        Queue admission is serialized with disposal. Invalid, disposed, or full
-        requests raise ``ValueError`` or ``RuntimeError``; a timeout does not
-        cancel work already accepted by the worker.
-        """
+    def invoke(self, operation: Callable[[], T], timeout_seconds: float) -> T:
+        """Run on the STA; cancel queued work on timeout, never interrupt running COM."""
 
         if operation is None:
             raise ValueError("operation must not be None")
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be greater than zero")
+        try:
+            check_cancelled()
+            cancellable = True
+        except NoEventLoopError:
+            cancellable = False
         future: Future[T] = Future()
-        work_item: ComWorkItem[T] = ComWorkItem(operation, future)
+        context = copy_context()
+        work_item: ComWorkItem[T] = ComWorkItem(lambda: context.run(operation), future)
         with self._lifecycle_lock:
             if self._disposed:
                 raise RuntimeError("COM dispatcher has been disposed")
@@ -68,10 +85,23 @@ class ComStaDispatcher:
             except queue.Full as exc:
                 raise RuntimeError("COM dispatcher queue is full.") from exc
 
+        deadline = monotonic() + timeout_seconds
         try:
-            return future.result(timeout=timeout_seconds)
-        except TimeoutError as exc:
-            raise TimeoutError(f"COM operation timed out after {timeout_seconds} seconds.") from exc
+            while True:
+                if cancellable:
+                    check_cancelled()
+                remaining = max(0.0, deadline - monotonic())
+                interval = min(remaining, CANCELLATION_POLL_SECONDS) if cancellable else remaining
+                try:
+                    return future.result(timeout=interval)
+                except TimeoutError as exc:
+                    if future.done():
+                        return future.result()
+                    if monotonic() >= deadline:
+                        raise ComOperationTimeout(timeout_seconds, cancelled_before_start=future.cancel()) from exc
+        except BaseException:
+            future.cancel()
+            raise
 
     def dispose(self) -> None:
         """Close admission, request worker shutdown, and wait for a bounded time.
@@ -103,7 +133,7 @@ class ComStaDispatcher:
                 work_item = self._work_items.get()
                 if work_item is None:
                     return
-                if work_item.future.cancelled():
+                if not work_item.future.set_running_or_notify_cancel():
                     continue
                 try:
                     result = work_item.operation()
