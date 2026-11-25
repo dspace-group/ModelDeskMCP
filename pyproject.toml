@@ -9,6 +9,7 @@ description = "Python 3.14 MCP server for ModelDesk Automation/COM."
 requires-python = ">=3.14"
 dependencies = [
     "mcp[cli]>=2,<3",
+    "opentelemetry-api>=1.45.2",
     "pywin32>=306; platform_system == 'Windows'",
     "scipy>=1.18,<2"
 ]

@@ -175,10 +175,17 @@ def test_skill_index_preserves_registry_order_within_each_domain() -> None:
 def test_public_checkout_excludes_personal_configuration_and_local_state() -> None:
     """Keep private checkout state excluded without hiding the public product skill."""
     root = SKILL_PATH.parents[3]
-    assert not (root / ".vscode" / "mcp.json").exists()
     assert SKILL_PATH.is_file()
     if not (root / ".git").exists() or shutil.which("git") is None:
-        pytest.skip("Shared ignore validation requires a Git checkout and Git.")
+        pytest.skip("Publication validation requires a Git checkout and Git.")
+    tracked_config = subprocess.run(
+        ["git", "ls-files", "--cached", "--", ".vscode/mcp.json"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert not tracked_config.stdout, "Keep the local MCP config out of Git tracking."
     private_paths = (
         ".vscode/mcp.json",
         ".agent-runtime/example/state.json",
