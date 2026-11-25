@@ -178,16 +178,9 @@ def test_public_checkout_excludes_personal_configuration_and_local_state() -> No
     assert SKILL_PATH.is_file()
     if not (root / ".git").exists() or shutil.which("git") is None:
         pytest.skip("Publication validation requires a Git checkout and Git.")
-    tracked_config = subprocess.run(
-        ["git", "ls-files", "--cached", "--", ".vscode/mcp.json"],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert not tracked_config.stdout, "Keep the local MCP config out of Git tracking."
     private_paths = (
-        ".vscode/mcp.json",
+        ".vscode/settings.json",
+        "local/mcp.json",
         ".agent-runtime/example/state.json",
         ".github/agents/example.agent.md",
         ".github/tools/example.mjs",
@@ -228,7 +221,7 @@ def test_public_checkout_excludes_personal_configuration_and_local_state() -> No
 
 
 def test_public_setup_docs_use_local_configuration_without_private_config_links() -> None:
-    """Retain usable product examples after removing the personal config file."""
+    """Retain standalone product examples without links to editor configuration."""
     root = SKILL_PATH.parents[3]
     for relative in ("README.md", "docs/clients.md"):
         document = (root / relative).read_text(encoding="utf-8")
